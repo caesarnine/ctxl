@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "contextual"
+authors = [{name = "Binal Patel", email = "binalkp91@gmail.com"}]
+description = "A CLI tool to dump a coding project into an LLM ideal format."
+readme = "README.md"
+requires-python = ">=3.6"
+keywords = ["cli", "folder", "structure"]
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "pathspec",
+]
+dynamic = ["version"]
+
+[project.scripts]
+contextual = "contextual.contextual:main"
+
+[tool.setuptools_scm]
+
+[tool.pytest.ini_options]
+addopts = "--cov=contextual"
+testpaths = [
+    "tests",
+]
+
+[tool.mypy]
+mypy_path = "src"
+check_untyped_defs = true
+disallow_any_generics = true
+ignore_missing_imports = true
+no_implicit_optional = true
+show_error_codes = true
+strict_equality = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_unreachable = true
+warn_unused_configs = true
+no_implicit_reexport = true

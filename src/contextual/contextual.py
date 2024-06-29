@@ -8,9 +8,7 @@ default_task = """Describe this coding project in detail.
 
 Pay special attention to the structure of the code, the design of the project, any frameworks/UI frameworks used, and the overall structure/workflow.
 
-If artifacts are available, then include any diagrams or charts that you think would be helpful.
-
-When suggesting new code or updates always output the entire file, not just the changes.
+If artifacts are available, then include any diagrams or charts that you think would be helpful. Use flowcharts and sequence diagrams.
 """
 
 
@@ -103,7 +101,7 @@ def main():
         "--suffixes",
         nargs="+",
         help="Allowed file suffixes (e.g., .txt .py)",
-        default=[".py", ".txt", ".tsx", ".js", ".css", ".json", ".html"],
+        default=[".py", ".txt", ".tsx", ".js", ".css", ".json", ".html", ".sql"],
     )
     parser.add_argument(
         "--ignore",

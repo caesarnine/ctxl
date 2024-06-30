@@ -1,6 +1,8 @@
 # ctxl: Contextual
 
-ctxl is a CLI tool designed to transform project directories into a structured XML format suitable for language models and AI analysis. It extracts file contents and directory structures while respecting gitignore rules and custom filters. It creates a comprehensive project snapshot that can be easily parsed by LLMs, with a customizable task specification that primes the LLM to be a better assistant with your project.
+ctxl is a CLI tool designed to transform project directories into a structured XML format suitable for language models and AI analysis. It intelligently extracts file contents and directory structures while respecting gitignore rules and custom filters. A key feature of ctxl is its ability to automatically detect project types (such as Python, JavaScript, or web projects) based on the files present in the directory. This auto-detection enables ctxl to make smart decisions about which files to include or exclude, ensuring that the output is relevant and concise. Users can also override this auto-detection with custom presets if needed.
+
+The tool creates a comprehensive project snapshot that can be easily parsed by LLMs, complete with a customizable task specification. This task specification acts as a prompt, priming the LLM to provide more targeted and relevant assistance with your project.
 
 ## Why ctxl?
 

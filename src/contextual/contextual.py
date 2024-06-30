@@ -62,6 +62,7 @@ PRESETS: Dict[str, Dict[str, List[str]]] = {
             ".ini",
             ".cfg",
             ".conf",
+            ".toml",
         ],
         "ignore": [],
     },

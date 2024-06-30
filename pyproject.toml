@@ -3,7 +3,7 @@ requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "contextual"
+name = "ctxl"
 authors = [{name = "Binal Patel", email = "binalkp91@gmail.com"}]
 description = "A CLI tool to dump projects into an LLM ideal format."
 readme = "README.md"
@@ -21,12 +21,12 @@ dependencies = [
 dynamic = ["version"]
 
 [project.scripts]
-contextual = "contextual.contextual:main"
+ctxl = "ctxl.ctxl:main"
 
 [tool.setuptools_scm]
 
 [tool.pytest.ini_options]
-addopts = "--cov=contextual"
+addopts = "--cov=ctxl"
 testpaths = [
     "tests",
 ]

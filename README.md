@@ -1,8 +1,28 @@
 # ctxl: Contextual
 
+[![PyPI version](https://badge.fury.io/py/ctxl.svg)](https://badge.fury.io/py/ctxl)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 ctxl is a CLI tool designed to transform project directories into a structured XML format suitable for language models and AI analysis. It intelligently extracts file contents and directory structures while respecting gitignore rules and custom filters. A key feature of ctxl is its ability to automatically detect project types (such as Python, JavaScript, or web projects) based on the files present in the directory. This auto-detection enables ctxl to make smart decisions about which files to include or exclude, ensuring that the output is relevant and concise. Users can also override this auto-detection with custom presets if needed.
 
 The tool creates a comprehensive project snapshot that can be easily parsed by LLMs, complete with a customizable task specification. This task specification acts as a prompt, priming the LLM to provide more targeted and relevant assistance with your project.
+
+## Table of Contents
+- [Why ctxl?](#why-ctxl)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Usage](#usage)
+  - [Basic Usage](#basic-usage)
+  - [Command-line Options](#command-line-options)
+  - [Presets](#presets)
+- [Features](#features)
+- [How It Works](#how-it-works)
+- [Output Example](#output-example)
+- [Integration with LLMs](#integration-with-llms)
+- [Project Structure](#project-structure)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Why ctxl?
 
@@ -24,7 +44,7 @@ After installation, you can quickly generate an XML representation of your proje
 ctxl /path/to/your/project > project_context.xml
 ```
 
-This command will create an XML file containing your project's structure and file contents, which you can then provide to an LLM for analysis or assistance.
+This command will create an XML file containing your project's structure and file contents, which you can then provide to an LLM for analysis or assistance. The XML output includes file contents, directory structure, and a default task description that guides the LLM in analyzing your project.
 
 ## Usage
 
@@ -36,7 +56,23 @@ To use ctxl, simply run the following command in your terminal:
 ctxl /path/to/your/project
 ```
 
-By default, this will output the XML representation of your project to stdout.
+By default, this will output the XML representation of your project to stdout. This allows for piping the output into other CLI tools, for example with [LLM](https://github.com/simonw/llm):
+
+```bash
+ctxl /path/to/your/project | llm
+```
+
+To output to a file:
+
+```bash
+ctxl /path/to/your/project > context.xml
+```
+
+or 
+
+```bash
+ctxl /path/to/your/project -o context.xml
+```
 
 ### Command-line Options
 
@@ -78,6 +114,15 @@ The tool can automatically detect project types, or you can specify them manuall
 - Generates XML output for easy parsing
 - Auto-detects project types
 - Allows custom task specifications for LLM priming
+
+## How It Works
+
+ctxl operates in several steps:
+1. It scans the specified directory to detect the project type(s).
+2. Based on the detected type(s) or user-specified presets, it determines which files to include or exclude.
+3. It reads the contents of included files and constructs a directory structure.
+4. All this information is then formatted into an XML structure, along with the specified task.
+5. The resulting XML is output to stdout or a specified file.
 
 ## Output Example
 
@@ -143,6 +188,17 @@ ctxl/
 ```
 
 The main functionality is implemented in `src/ctxl/ctxl.py`.
+
+## Troubleshooting
+
+- **Issue**: ctxl is not detecting my project type correctly.
+  **Solution**: Use the `--presets` option to manually specify the project type(s).
+
+- **Issue**: ctxl is including/excluding files I don't want.
+  **Solution**: Use the `--suffixes` and `--ignore` options to customize file selection.
+
+- **Issue**: The XML output is too large for my LLM to process.
+  **Solution**: Try using more specific presets or custom ignore patterns to reduce the amount of included content.
 
 ## Contributing
 

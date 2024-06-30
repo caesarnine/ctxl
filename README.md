@@ -122,7 +122,7 @@ The resulting `ctxl_context.xml` would look something like this:
       </directory>
     </directory_structure>
   </project_context>
-  <task>Describe this coding project in detail. Pay special attention to the structure of the code, the design of the project, any frameworks/UI frameworks used, and the overall structure/workflow.</task>
+  <task>Describe this project in detail. Pay special attention to the structure of the code, the design of the project, any frameworks/UI frameworks used, and the overall structure/workflow.</task>
 </root>
 ```
 

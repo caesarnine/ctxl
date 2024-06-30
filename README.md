@@ -208,4 +208,4 @@ Contributions to ctxl are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the Apache License, Version 2.0. See the LICENSE file for details.

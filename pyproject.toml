@@ -9,7 +9,7 @@ description = "A CLI tool to dump projects into an LLM ideal format."
 readme = "README.md"
 requires-python = ">=3.6"
 keywords = ["cli", "folder", "structure"]
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",

@@ -7,6 +7,8 @@ ctxl is a CLI tool designed to transform project directories into a structured X
 
 The tool creates a comprehensive project snapshot that can be easily parsed by LLMs, complete with a customizable task specification. This task specification acts as a prompt, priming the LLM to provide more targeted and relevant assistance with your project.
 
+ctxl was developed through a bootstrapping process, where each version was used to generate context for an LLM in developing the next version.
+
 ## Table of Contents
 - [Why ctxl?](#why-ctxl)
 - [Installation](#installation)

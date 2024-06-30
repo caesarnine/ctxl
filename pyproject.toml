@@ -20,6 +20,12 @@ dependencies = [
 ]
 dynamic = ["version"]
 
+[project.urls]
+"Homepage" = "https://github.com/caesarnine/ctxl"
+"Bug Tracker" = "https://github.com/caesarnine/ctxl/issues"
+"Repository" = "https://github.com/caesarnine/ctxl.git"
+"Documentation" = "https://github.com/caesarnine/ctxl#readme"
+
 [project.scripts]
 ctxl = "ctxl.ctxl:main"
 

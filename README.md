@@ -124,13 +124,6 @@ The resulting `ctxl_context.xml` would look something like this:
 </root>
 ```
 
-This example showcases:
-1. The main Python file (`ctxl.py`) with its content, including imports, preset definitions, and the main function structure.
-2. The `__init__.py` file, showing that ctxl is structured as a Python package.
-3. The `pyproject.toml` file, which contains the project's metadata and build configuration.
-4. The directory structure of the ctxl project.
-5. The default task specification as defined in the ctxl code.
-
 The XML output provides a comprehensive view of the ctxl project, including file contents, structure, and a task description. This format allows LLMs to easily parse and understand the project context, enabling them to provide more accurate and relevant assistance.
 
 ## Project Structure

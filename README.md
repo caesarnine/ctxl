@@ -1,7 +1,7 @@
 # ctxl: Contextual
 
 [![PyPI version](https://badge.fury.io/py/ctxl.svg)](https://badge.fury.io/py/ctxl)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 ctxl is a CLI tool designed to transform project directories into a structured XML format suitable for language models and AI analysis. It intelligently extracts file contents and directory structures while respecting gitignore rules and custom filters. A key feature of ctxl is its ability to automatically detect project types (such as Python, JavaScript, or web projects) based on the files present in the directory. This auto-detection enables ctxl to make smart decisions about which files to include or exclude, ensuring that the output is relevant and concise. Users can also override this auto-detection with custom presets if needed.
 

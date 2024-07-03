@@ -239,7 +239,7 @@ def main():
     parser.add_argument(
         "--task",
         help="Task description to be included in the output",
-        default="Describe this project in detail. Pay special attention to the structure of the code, the design of the project, any frameworks/UI frameworks used, and the overall structure/workflow.",
+        default="Describe this project in detail. Pay special attention to the structure of the code, the design of the project, any frameworks/UI frameworks used, and the overall structure/workflow. If artifacts are available, then use workflow and sequence diagrams to help describe the project.",
     )
     parser.add_argument(
         "--no-auto-detect",

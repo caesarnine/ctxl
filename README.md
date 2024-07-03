@@ -13,12 +13,13 @@ ctxl was developed through a bootstrapping process, where each version was used 
 - [Why ctxl?](#why-ctxl)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+  - [Workflow](#workflow)
+- [How It Works](#how-it-works)
 - [Usage](#usage)
   - [Basic Usage](#basic-usage)
   - [Command-line Options](#command-line-options)
   - [Presets](#presets)
 - [Features](#features)
-- [How It Works](#how-it-works)
 - [Output Example](#output-example)
 - [Integration with LLMs](#integration-with-llms)
 - [Project Structure](#project-structure)
@@ -46,7 +47,31 @@ After installation, you can quickly generate an XML representation of your proje
 ctxl /path/to/your/project > project_context.xml
 ```
 
-This command will create an XML file containing your project's structure and file contents, which you can then provide to an LLM for analysis or assistance. The XML output includes file contents, directory structure, and a default task description that guides the LLM in analyzing your project.
+This command will create an XML file which you can then provide to an LLM for analysis or assistance. The XML output includes file contents, directory structure, and a default task description that guides the LLM in analyzing your project.
+
+### Workflow
+
+This is how I've been using it - essentially as a iterative process.
+
+1. Paste this directly into your LLM's chat interface (or via API/CLI) and let it respond first. I've found the latest Claude models (Sonnet 3.5 as of writing this) to work best.
+2. The LLM will respond with a thorough breakdown and summary of the project first, which helps to prime the LLM with a better contextual understanding of the project, frameworks/libraries used, and overall user/data flow. 
+3. Chat with it as normal after. You can ask for things like:
+    >I'd like to update the frontend to show live progress when the backend is processing documents.
+
+4. The LLM will use the context of your entire project to suggest refactors/updates to all the relevant files involved to fulfill that ask.
+5. Update those files/sections, see if it works/if you like it, if not give feedback/error messages back to the model and keep iterating on.
+
+Future improvements to ctxl will likely automate #4 and #5 of this process.
+
+
+## How It Works
+
+ctxl operates in several steps:
+1. It scans the specified directory to detect the project type(s).
+2. Based on the detected type(s) or user-specified presets, it determines which files to include or exclude.
+3. It reads the contents of included files and constructs a directory structure.
+4. All this information is then formatted into an XML structure, along with the specified task.
+5. The resulting XML is output to stdout or a specified file.
 
 ## Usage
 
@@ -116,15 +141,6 @@ The tool can automatically detect project types, or you can specify them manuall
 - Generates XML output for easy parsing
 - Auto-detects project types
 - Allows custom task specifications for LLM priming
-
-## How It Works
-
-ctxl operates in several steps:
-1. It scans the specified directory to detect the project type(s).
-2. Based on the detected type(s) or user-specified presets, it determines which files to include or exclude.
-3. It reads the contents of included files and constructs a directory structure.
-4. All this information is then formatted into an XML structure, along with the specified task.
-5. The resulting XML is output to stdout or a specified file.
 
 ## Output Example
 

@@ -6,10 +6,9 @@ from typing import BinaryIO, Dict, List, Set, TextIO, Union
 
 import pathspec
 
-# Define presets for different project types
 PRESETS: Dict[str, Dict[str, List[str]]] = {
     "python": {
-        "suffixes": [".py", ".pyi", ".pyx", ".ipynb"],
+        "suffixes": [".py", ".pyi", ".pyx"],
         "ignore": [
             "__pycache__",
             "*.pyc",
@@ -19,10 +18,12 @@ PRESETS: Dict[str, Dict[str, List[str]]] = {
             "dist",
             "*.egg-info",
             "venv",
+            ".pytest_cache",
+            ".ipynb",
         ],
     },
     "javascript": {
-        "suffixes": [".js", ".jsx", ".mjs", ".cjs"],
+        "suffixes": [".js", ".mjs", ".cjs", ".jsx"],
         "ignore": [
             "node_modules",
             "npm-debug.log",
@@ -48,8 +49,87 @@ PRESETS: Dict[str, Dict[str, List[str]]] = {
         ],
     },
     "web": {
-        "suffixes": [".html", ".css", ".scss", ".sass", ".less"],
+        "suffixes": [".html", ".css", ".scss", ".sass", ".less", ".vue"],
         "ignore": ["node_modules", "bower_components", "dist", "build", ".cache"],
+    },
+    "java": {
+        "suffixes": [".java"],
+        "ignore": [
+            "target",
+            ".gradle",
+            "build",
+            "out",
+        ],
+    },
+    "csharp": {
+        "suffixes": [".cs", ".csx", ".csproj"],
+        "ignore": [
+            "bin",
+            "obj",
+            "*.suo",
+            "*.user",
+            "*.userosscache",
+            "*.sln.docstates",
+        ],
+    },
+    "go": {
+        "suffixes": [".go"],
+        "ignore": [
+            "vendor",
+        ],
+    },
+    "ruby": {
+        "suffixes": [".rb", ".rake", ".gemspec"],
+        "ignore": [
+            ".bundle",
+            "vendor/bundle",
+        ],
+    },
+    "php": {
+        "suffixes": [".php"],
+        "ignore": [
+            "vendor",
+            "composer.lock",
+        ],
+    },
+    "rust": {
+        "suffixes": [".rs"],
+        "ignore": [
+            "target",
+            "Cargo.lock",
+        ],
+    },
+    "swift": {
+        "suffixes": [".swift"],
+        "ignore": [
+            ".build",
+            "Packages",
+        ],
+    },
+    "kotlin": {
+        "suffixes": [".kt", ".kts"],
+        "ignore": [
+            ".gradle",
+            "build",
+            "out",
+        ],
+    },
+    "scala": {
+        "suffixes": [".scala", ".sc"],
+        "ignore": [
+            ".bloop",
+            ".metals",
+            "target",
+        ],
+    },
+    "docker": {
+        "suffixes": [
+            "Dockerfile",
+            ".dockerignore",
+            "docker-compose.yml",
+            "docker-compose.yaml",
+        ],
+        "ignore": [],
     },
     "misc": {
         "suffixes": [
@@ -73,15 +153,6 @@ DEFAULT_IGNORE = [".*"]  # This will ignore all dotfiles and folders
 
 
 def detect_project_types(folder_path: str) -> Set[str]:
-    """
-    Detect project types based on the file suffixes present in the directory.
-
-    Args:
-    folder_path (str): Path to the project folder
-
-    Returns:
-    Set[str]: Set of detected project types
-    """
     detected_suffixes = set()
 
     for root, _, files in os.walk(folder_path):

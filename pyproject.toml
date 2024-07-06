@@ -17,6 +17,7 @@ classifiers = [
 ]
 dependencies = [
     "pathspec",
+    "PyYAML",
 ]
 dynamic = ["version"]
 
@@ -30,6 +31,12 @@ dynamic = ["version"]
 ctxl = "ctxl.ctxl:main"
 
 [tool.setuptools_scm]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ctxl = ["py.typed"]
 
 [tool.pytest.ini_options]
 addopts = "--cov=ctxl"

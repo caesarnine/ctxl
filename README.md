@@ -63,7 +63,6 @@ This is how I've been using it - essentially as a iterative process.
 
 Future improvements to ctxl will likely automate #4 and #5 of this process.
 
-
 ## How It Works
 
 ctxl operates in several steps:
@@ -112,6 +111,9 @@ ctxl offers several command-line options to customize its behavior:
 - `--gitignore`: Specify a custom .gitignore file path
 - `--task`: Include a custom task description in the output
 - `--no-auto-detect`: Disable auto-detection of project types
+- `--view-presets`: Display all available presets (both built-in and custom)
+- `--save-presets`: Save the built-in presets to a YAML file for easy customization
+- `-v, --verbose`: Enable verbose logging for more detailed output
 
 Example:
 
@@ -125,6 +127,24 @@ Don't use any presets and fully control what to include/exclude.
 
 ```bash
 ctxl /path/to/your/project --no-auto-detect --output project_context.xml --task "Analyze this project for potential security vulnerabilities" --filter *.py *.js *.md !node_modules
+```
+
+To view all available presets:
+
+```bash
+ctxl --view-presets
+```
+
+To save the built-in presets to a YAML file. You can then modify these/add your own, if this file exists in the directory you're running ctxl on then they'll automatically be loaded in and used instead of the defaults.
+
+```bash
+ctxl --save-presets
+```
+
+To enable verbose logging:
+
+```bash
+ctxl /path/to/your/project -v
 ```
 
 ### Presets
@@ -157,6 +177,8 @@ The tool automatically detects project types, but you can also specify them manu
 - Simple CLI for easy integration into development workflows
 - Efficiently handles large, polyglot projects
 - Supports a wide range of programming languages and frameworks
+- Customizable presets with ability to view and save presets
+- Verbose logging option for detailed process information
 
 ## Output Example
 
@@ -216,12 +238,13 @@ ctxl/
 ├── src/
 │   └── ctxl/
 │       ├── __init__.py
-│       └── ctxl.py
+│       ├── ctxl.py
+│       └── preset_manager.py
 ├── README.md
 └── pyproject.toml
 ```
 
-The main functionality is implemented in `src/ctxl/ctxl.py`.
+The main functionality is implemented in `src/ctxl/ctxl.py`, with preset management handled in `src/ctxl/preset_manager.py`.
 
 ## Troubleshooting
 
@@ -233,6 +256,9 @@ The main functionality is implemented in `src/ctxl/ctxl.py`.
 
 - **Issue**: The XML output is too large for my LLM to process.
   **Solution**: Try using more specific presets or custom ignore patterns to reduce the amount of included content.
+
+- **Issue**: I need more information about what ctxl is doing.
+  **Solution**: Use the `-v` or `--verbose` flag to enable verbose logging for more detailed output.
 
 ## Contributing
 

@@ -124,7 +124,7 @@ ctxl /path/to/your/project --presets python javascript --output project_context.
 Don't use any presets and fully control what to include/exclude.
 
 ```bash
-ctxl /path/to/your/project --no-auto-detect --output project_context.xml --task "Analyze this project for potential security vulnerabilities" --filter +*.py *.js *.md !node_modules
+ctxl /path/to/your/project --no-auto-detect --output project_context.xml --task "Analyze this project for potential security vulnerabilities" --filter *.py *.js *.md !node_modules
 ```
 
 ### Presets

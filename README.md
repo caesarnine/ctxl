@@ -107,8 +107,7 @@ ctxl offers several command-line options to customize its behavior:
 
 - `-o, --output`: Specify the output file path (default: stdout)
 - `--presets`: Choose preset project types to combine (default: auto-detect)
-- `--suffixes`: Specify allowed file suffixes (overrides presets)
-- `--ignore`: Add additional folders/files to ignore
+- `--filter`: Filter patterns to include or exclude (!) files. Example: `'*.py !__pycache__'`
 - `--include-dotfiles`: Include dotfiles and folders in the output
 - `--gitignore`: Specify a custom .gitignore file path
 - `--task`: Include a custom task description in the output
@@ -116,8 +115,16 @@ ctxl offers several command-line options to customize its behavior:
 
 Example:
 
+Use existing presets with additional filters to include `.log` and `.txt` and exclude a `temp` directory.
+
 ```bash
-ctxl /path/to/your/project --presets python javascript --output project_context.xml --task "Analyze this project for potential security vulnerabilities"
+ctxl /path/to/your/project --presets python javascript --output project_context.xml --task "Analyze this project for potential security vulnerabilities" --filter *.log *.txt !temp
+```
+
+Don't use any presets and fully control what to include/exclude.
+
+```bash
+ctxl /path/to/your/project --no-auto-detect --output project_context.xml --task "Analyze this project for potential security vulnerabilities" --filter +*.py *.js *.md !node_modules
 ```
 
 ### Presets
@@ -127,20 +134,29 @@ ctxl includes presets for common project types:
 - python: Includes .py, .pyi, .pyx, .ipynb files, ignores common Python-specific directories and files
 - javascript: Includes .js, .jsx, .mjs, .cjs files, ignores node_modules and other JS-specific files
 - typescript: Includes .ts, .tsx files, similar ignores to JavaScript
-- web: Includes .html, .css, .scss, .sass, .less files
+- web: Includes .html, .css, .scss, .sass, .less, .vue files
+- java: Includes .java files, ignores common Java build directories
+- csharp: Includes .cs, .csx, .csproj files, ignores common C# build artifacts
+- go: Includes .go files, ignores vendor directory
+- ruby: Includes .rb, .rake, .gemspec files, ignores bundle-related directories
+- php: Includes .php files, ignores vendor directory
+- rust: Includes .rs files, ignores target directory and Cargo.lock
+- swift: Includes .swift files, ignores .build and Packages directories
+- kotlin: Includes .kt, .kts files, ignores common Kotlin/Java build directories
+- scala: Includes .scala, .sc files, ignores common Scala build directories
+- docker: Includes Dockerfile, .dockerignore, and docker-compose files
 - misc: Includes common configuration and documentation file types
 
-The tool can automatically detect project types, or you can specify them manually.
+The tool automatically detects project types, but you can also specify them manually using the `--presets` option.
 
 ## Features
 
-- Extracts project structure and file contents
-- Supports multiple programming languages and project types
-- Customizable file inclusion/exclusion
-- Respects .gitignore rules
-- Generates XML output for easy parsing
-- Auto-detects project types
-- Allows custom task specifications for LLM priming
+- Auto-detects project types and respects .gitignore rules to determine what files to include/exclude
+- Fully customizable file inclusion/exclusion via `--filter` if you need more control
+- Generates AI-ready XML output with custom task descriptions
+- Simple CLI for easy integration into development workflows
+- Efficiently handles large, polyglot projects
+- Supports a wide range of programming languages and frameworks
 
 ## Output Example
 
@@ -213,7 +229,7 @@ The main functionality is implemented in `src/ctxl/ctxl.py`.
   **Solution**: Use the `--presets` option to manually specify the project type(s).
 
 - **Issue**: ctxl is including/excluding files I don't want.
-  **Solution**: Use the `--suffixes` and `--ignore` options to customize file selection.
+  **Solution**: Use the `--filter` option, if you want full control use `--filter` with `--no-auto-detect`.
 
 - **Issue**: The XML output is too large for my LLM to process.
   **Solution**: Try using more specific presets or custom ignore patterns to reduce the amount of included content.

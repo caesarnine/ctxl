@@ -8,8 +8,9 @@ import pathspec
 
 PRESETS: Dict[str, Dict[str, List[str]]] = {
     "python": {
-        "suffixes": [".py", ".pyi", ".pyx"],
-        "ignore": [
+        "suffixes": [".py", ".pyi", ".pyx", ".ipynb"],
+        "include": ["*.py", "*.pyi", "*.pyx", "*.ipynb"],
+        "exclude": [
             "__pycache__",
             "*.pyc",
             "*.pyo",
@@ -19,12 +20,12 @@ PRESETS: Dict[str, Dict[str, List[str]]] = {
             "*.egg-info",
             "venv",
             ".pytest_cache",
-            ".ipynb",
         ],
     },
     "javascript": {
         "suffixes": [".js", ".mjs", ".cjs", ".jsx"],
-        "ignore": [
+        "include": ["*.js", "*.mjs", "*.cjs", "*.jsx"],
+        "exclude": [
             "node_modules",
             "npm-debug.log",
             "yarn-error.log",
@@ -37,7 +38,8 @@ PRESETS: Dict[str, Dict[str, List[str]]] = {
     },
     "typescript": {
         "suffixes": [".ts", ".tsx"],
-        "ignore": [
+        "include": ["*.ts", "*.tsx"],
+        "exclude": [
             "node_modules",
             "npm-debug.log",
             "yarn-error.log",
@@ -50,11 +52,13 @@ PRESETS: Dict[str, Dict[str, List[str]]] = {
     },
     "web": {
         "suffixes": [".html", ".css", ".scss", ".sass", ".less", ".vue"],
-        "ignore": ["node_modules", "bower_components", "dist", "build", ".cache"],
+        "include": ["*.html", "*.css", "*.scss", "*.sass", "*.less", "*.vue"],
+        "exclude": ["node_modules", "bower_components", "dist", "build", ".cache"],
     },
     "java": {
         "suffixes": [".java"],
-        "ignore": [
+        "include": ["*.java"],
+        "exclude": [
             "target",
             ".gradle",
             "build",
@@ -63,7 +67,8 @@ PRESETS: Dict[str, Dict[str, List[str]]] = {
     },
     "csharp": {
         "suffixes": [".cs", ".csx", ".csproj"],
-        "ignore": [
+        "include": ["*.cs", "*.csx", "*.csproj"],
+        "exclude": [
             "bin",
             "obj",
             "*.suo",
@@ -74,41 +79,47 @@ PRESETS: Dict[str, Dict[str, List[str]]] = {
     },
     "go": {
         "suffixes": [".go"],
-        "ignore": [
+        "include": ["*.go"],
+        "exclude": [
             "vendor",
         ],
     },
     "ruby": {
         "suffixes": [".rb", ".rake", ".gemspec"],
-        "ignore": [
+        "include": ["*.rb", "*.rake", "*.gemspec"],
+        "exclude": [
             ".bundle",
             "vendor/bundle",
         ],
     },
     "php": {
         "suffixes": [".php"],
-        "ignore": [
+        "include": ["*.php"],
+        "exclude": [
             "vendor",
             "composer.lock",
         ],
     },
     "rust": {
         "suffixes": [".rs"],
-        "ignore": [
+        "include": ["*.rs"],
+        "exclude": [
             "target",
             "Cargo.lock",
         ],
     },
     "swift": {
         "suffixes": [".swift"],
-        "ignore": [
+        "include": ["*.swift"],
+        "exclude": [
             ".build",
             "Packages",
         ],
     },
     "kotlin": {
         "suffixes": [".kt", ".kts"],
-        "ignore": [
+        "include": ["*.kt", "*.kts"],
+        "exclude": [
             ".gradle",
             "build",
             "out",
@@ -116,20 +127,24 @@ PRESETS: Dict[str, Dict[str, List[str]]] = {
     },
     "scala": {
         "suffixes": [".scala", ".sc"],
-        "ignore": [
+        "include": ["*.scala", "*.sc"],
+        "exclude": [
             ".bloop",
             ".metals",
             "target",
         ],
     },
     "docker": {
-        "suffixes": [
+        "suffixes": [".dockerfile", ".dockerignore"],
+        "prefixes": ["Dockerfile"],
+        "include": [
             "Dockerfile",
+            "Dockerfile.*",
             ".dockerignore",
             "docker-compose.yml",
             "docker-compose.yaml",
         ],
-        "ignore": [],
+        "exclude": [],
     },
     "misc": {
         "suffixes": [
@@ -144,54 +159,95 @@ PRESETS: Dict[str, Dict[str, List[str]]] = {
             ".conf",
             ".toml",
         ],
-        "ignore": [],
+        "include": [
+            "*.md",
+            "*.txt",
+            "*.json",
+            "*.xml",
+            "*.yml",
+            "*.yaml",
+            "*.ini",
+            "*.cfg",
+            "*.conf",
+            "*.toml",
+        ],
+        "exclude": [],
     },
 }
 
-# Default ignore patterns
-DEFAULT_IGNORE = [".*"]  # This will ignore all dotfiles and folders
+# Default exclude patterns
+DEFAULT_EXCLUDE = [".*"]  # This will exclude all dotfiles and folders
 
 
 def detect_project_types(folder_path: str) -> Set[str]:
-    detected_suffixes = set()
+    detected_types = set()
 
     for root, _, files in os.walk(folder_path):
         for file in files:
+            file_lower = file.lower()
+
+            # Check prefixes
+            for project_type, preset in PRESETS.items():
+                if "prefixes" in preset and any(
+                    file_lower.startswith(prefix.lower())
+                    for prefix in preset["prefixes"]
+                ):
+                    detected_types.add(project_type)
+                    continue
+
+            # Check suffixes
             _, ext = os.path.splitext(file)
             if ext:
-                detected_suffixes.add(ext.lower())
+                for project_type, preset in PRESETS.items():
+                    if ext in preset["suffixes"]:
+                        detected_types.add(project_type)
+                        break  # No need to check other presets for this file
 
-    detected_types = set()
-    for project_type, preset in PRESETS.items():
-        if any(suffix in detected_suffixes for suffix in preset["suffixes"]):
-            detected_types.add(project_type)
+            # Check for exact matches (like docker-compose.yml)
+            for project_type, preset in PRESETS.items():
+                if file in preset.get("include", []):
+                    detected_types.add(project_type)
 
     return detected_types
 
 
-def combine_presets(preset_names: List[str]) -> Dict[str, List[str]]:
-    """
-    Combine multiple presets into a single configuration.
+def parse_filter_patterns(filter_string: str) -> Dict[str, List[str]]:
+    if not filter_string:
+        return {"include": [], "exclude": []}
 
-    Args:
-    preset_names (List[str]): List of preset names to combine.
+    patterns = filter_string.split()
+    include_patterns = []
+    exclude_patterns = []
+    for pattern in patterns:
+        if pattern.startswith("!"):
+            exclude_patterns.append(pattern[1:])
+        else:
+            include_patterns.append(pattern)
+    return {"include": include_patterns, "exclude": exclude_patterns}
 
-    Returns:
-    Dict[str, List[str]]: Combined preset configuration.
-    """
-    combined_preset = {"suffixes": set(), "ignore": set(DEFAULT_IGNORE)}
+
+def combine_presets(
+    preset_names: List[str], filter_patterns: Dict[str, List[str]]
+) -> Dict[str, List[str]]:
+    combined_preset = {"include": set(), "exclude": set(DEFAULT_EXCLUDE)}
 
     for preset_name in preset_names:
         if preset_name in PRESETS:
             preset = PRESETS[preset_name]
-            combined_preset["suffixes"].update(preset["suffixes"])
-            combined_preset["ignore"].update(preset["ignore"])
+            combined_preset["include"].update(preset["include"])
+            combined_preset["exclude"].update(preset["exclude"])
         else:
-            print(f"Warning: Preset '{preset_name}' not found. Skipping.")
+            print(
+                f"Warning: Preset '{preset_name}' not found. Skipping.", file=sys.stderr
+            )
+
+    # Add user-specified filter patterns
+    combined_preset["include"].update(filter_patterns["include"])
+    combined_preset["exclude"].update(filter_patterns["exclude"])
 
     return {
-        "suffixes": sorted(list(combined_preset["suffixes"])),
-        "ignore": sorted(list(combined_preset["ignore"])),
+        "include": sorted(list(combined_preset["include"])),
+        "exclude": sorted(list(combined_preset["exclude"])),
     }
 
 
@@ -213,53 +269,54 @@ def create_file_element(file_path, file_content):
 def dump_folder_contents(
     folder_path,
     output: Union[str, TextIO, BinaryIO],
-    allowed_suffixes,
-    additional_ignore,
+    include_patterns,
+    exclude_patterns,
     gitignore_path,
     task,
 ):
     gitignore_patterns = read_gitignore(gitignore_path)
-    all_ignore_patterns = DEFAULT_IGNORE + gitignore_patterns + additional_ignore
-    spec = pathspec.PathSpec.from_lines("gitwildmatch", all_ignore_patterns)
+
+    # Create separate PathSpec objects for include and exclude patterns
+    include_spec = pathspec.PathSpec.from_lines("gitwildmatch", include_patterns)
+    exclude_spec = pathspec.PathSpec.from_lines(
+        "gitwildmatch", exclude_patterns + gitignore_patterns
+    )
 
     root_element = ET.Element("root")
     project_context = ET.SubElement(root_element, "project_context")
 
     for root, dirs, files in os.walk(folder_path):
+        rel_root = os.path.relpath(root, folder_path)
         dirs[:] = [
-            d
-            for d in dirs
-            if not spec.match_file(os.path.relpath(os.path.join(root, d), folder_path))
+            d for d in dirs if not exclude_spec.match_file(os.path.join(rel_root, d))
         ]
         for file in files:
-            file_path = os.path.join(root, file)
-            rel_file_path = os.path.relpath(file_path, folder_path)
-            if any(
-                file.endswith(suffix) for suffix in allowed_suffixes
-            ) and not spec.match_file(rel_file_path):
+            rel_file_path = os.path.join(rel_root, file)
+            if include_spec.match_file(rel_file_path) and not exclude_spec.match_file(
+                rel_file_path
+            ):
                 try:
-                    with open(file_path, "r", encoding="utf-8") as f:
+                    with open(os.path.join(root, file), "r", encoding="utf-8") as f:
                         file_content = f.read()
                     file_element = create_file_element(rel_file_path, file_content)
                     project_context.append(file_element)
                 except Exception as e:
-                    error_element = ET.Element("error", path=file_path)
+                    error_element = ET.Element("error", path=rel_file_path)
                     error_element.text = str(e)
                     project_context.append(error_element)
 
     dir_structure_element = ET.SubElement(project_context, "directory_structure")
     for root, dirs, files in os.walk(folder_path):
+        rel_root = os.path.relpath(root, folder_path)
         dirs[:] = [
-            d
-            for d in dirs
-            if not spec.match_file(os.path.relpath(os.path.join(root, d), folder_path))
+            d for d in dirs if not exclude_spec.match_file(os.path.join(rel_root, d))
         ]
-        dir_element = ET.Element("directory", path=os.path.relpath(root, folder_path))
+        dir_element = ET.Element("directory", path=rel_root)
         for file in files:
-            rel_file_path = os.path.relpath(os.path.join(root, file), folder_path)
-            if any(
-                file.endswith(suffix) for suffix in allowed_suffixes
-            ) and not spec.match_file(rel_file_path):
+            rel_file_path = os.path.join(rel_root, file)
+            if include_spec.match_file(rel_file_path) and not exclude_spec.match_file(
+                rel_file_path
+            ):
                 file_element = ET.Element("file", path=rel_file_path)
                 dir_element.append(file_element)
         dir_structure_element.append(dir_element)
@@ -290,12 +347,9 @@ def main():
         help="Preset project types to combine (default: auto-detect)",
     )
     parser.add_argument(
-        "--suffixes", nargs="+", help="Allowed file suffixes (overrides presets)"
-    )
-    parser.add_argument(
-        "--ignore",
-        nargs="*",
-        help="Additional folders/files to ignore (added to preset ignores)",
+        "--filter",
+        type=str,
+        help="Filter patterns to include or exclude files. Use '!' to exclude. Example: --filter '*.py !__pycache__ !*.pyc'",
     )
     parser.add_argument(
         "--include-dotfiles",
@@ -332,24 +386,21 @@ def main():
                 "No specific project types detected. Using misc preset.",
                 file=sys.stderr,
             )
-            args.presets = ["misc"]
+            args.presets = []
     elif not args.presets:
-        args.presets = ["misc"]
+        args.presets = []
 
-    # Always include 'misc' preset
-    if "misc" not in args.presets:
-        args.presets.append("misc")
+    # Parse filter patterns
+    filter_patterns = parse_filter_patterns(args.filter or [])
 
-    # Combine presets
-    combined_preset = combine_presets(args.presets)
+    # Combine presets and apply filters
+    combined_preset = combine_presets(args.presets, filter_patterns)
 
-    # Apply combined preset and custom arguments
-    suffixes = args.suffixes if args.suffixes else combined_preset["suffixes"]
-    ignore = combined_preset["ignore"] + (args.ignore or [])
-
-    # Remove the default dotfile ignore if --include-dotfiles is specified
+    # Remove the default dotfile exclude if --include-dotfiles is specified
     if args.include_dotfiles:
-        ignore = [pattern for pattern in ignore if pattern != ".*"]
+        combined_preset["exclude"] = [
+            pattern for pattern in combined_preset["exclude"] if pattern != ".*"
+        ]
 
     # Set the default gitignore path if not provided
     if args.gitignore is None:
@@ -364,8 +415,8 @@ def main():
     dump_folder_contents(
         args.folder_path,
         output,
-        suffixes,
-        ignore,
+        combined_preset["include"],
+        combined_preset["exclude"],
         args.gitignore,
         args.task,
     )

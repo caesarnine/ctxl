@@ -69,8 +69,9 @@ ctxl operates in several steps:
 1. It scans the specified directory to detect the project type(s).
 2. Based on the detected type(s) or user-specified presets, it determines which files to include or exclude.
 3. It reads the contents of included files and constructs a directory structure.
-4. All this information is then formatted into an XML structure, along with the specified task.
-5. The resulting XML is output to stdout or a specified file.
+4. If enabled, it analyzes Python dependencies within the project and includes a dependency tree.
+5. All this information is then formatted into an XML structure, along with the specified task.
+6. The resulting XML is output to stdout or a specified file.
 
 ## Usage
 
@@ -113,6 +114,7 @@ ctxl offers several command-line options to customize its behavior:
 - `--no-auto-detect`: Disable auto-detection of project types
 - `--view-presets`: Display all available presets (both built-in and custom)
 - `--save-presets`: Save the built-in presets to a YAML file for easy customization
+- `--analyze-deps`: Analyze project dependencies (default: True)
 - `-v, --verbose`: Enable verbose logging for more detailed output
 
 Example:
@@ -179,6 +181,7 @@ The tool automatically detects project types, but you can also specify them manu
 - Supports a wide range of programming languages and frameworks
 - Customizable presets with ability to view and save presets
 - Verbose logging option for detailed process information
+- Dependency analysis for Python projects (enabled by default)
 
 ## Output Example
 
@@ -222,12 +225,29 @@ The resulting `ctxl_context.xml` would look something like this:
         </directory>
       </directory>
     </directory_structure>
+    <dependencies>
+      <file path="src.ctxl.ctxl">
+        <upstream>
+          <external>
+            <dependency>argparse</dependency>
+            <dependency>logging</dependency>
+            ...
+          </external>
+          <internal>
+            <dependency>src.ctxl.dependency_analyzer</dependency>
+            <dependency>src.ctxl.preset_manager</dependency>
+          </internal>
+        </upstream>
+        <downstream />
+      </file>
+      ...
+    </dependencies>
   </project_context>
   <task>Describe this project in detail. Pay special attention to the structure of the code, the design of the project, any frameworks/UI frameworks used, and the overall structure/workflow. If artifacts are available, then use workflow and sequence diagrams to help describe the project.</task>
 </root>
 ```
 
-The XML output provides a comprehensive view of the ctxl project, including file contents, structure, and a task description. This format allows LLMs to easily parse and understand the project context, enabling them to provide more accurate and relevant assistance.
+The XML output provides a comprehensive view of the ctxl project, including file contents, structure, dependencies, and a task description. This format allows LLMs to easily parse and understand the project context, enabling them to provide more accurate and relevant assistance.
 
 ## Project Structure
 
@@ -239,12 +259,13 @@ ctxl/
 │   └── ctxl/
 │       ├── __init__.py
 │       ├── ctxl.py
-│       └── preset_manager.py
+│       ├── preset_manager.py
+│       └── dependency_analyzer.py
 ├── README.md
 └── pyproject.toml
 ```
 
-The main functionality is implemented in `src/ctxl/ctxl.py`, with preset management handled in `src/ctxl/preset_manager.py`.
+The main functionality is implemented in `src/ctxl/ctxl.py`, with preset management handled in `src/ctxl/preset_manager.py` and dependency analysis in `src/ctxl/dependency_analyzer.py`.
 
 ## Troubleshooting
 
@@ -259,6 +280,9 @@ The main functionality is implemented in `src/ctxl/ctxl.py`, with preset managem
 
 - **Issue**: I need more information about what ctxl is doing.
   **Solution**: Use the `-v` or `--verbose` flag to enable verbose logging for more detailed output.
+
+- **Issue**: The dependency analysis is not working or is causing errors.
+  **Solution**: You can disable dependency analysis with `--analyze-deps false` if it's causing issues.
 
 ## Contributing
 

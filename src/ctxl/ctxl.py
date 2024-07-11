@@ -7,6 +7,7 @@ from typing import BinaryIO, Dict, List, Set, TextIO, Union
 
 import pathspec
 
+from .dependency_analyzer import analyze_dependencies
 from .preset_manager import (
     get_presets,
     load_presets,
@@ -129,6 +130,7 @@ def dump_folder_contents(
     exclude_patterns,
     gitignore_path,
     task,
+    dependencies_element=None,
 ):
     gitignore_patterns = read_gitignore(gitignore_path)
 
@@ -185,6 +187,9 @@ def dump_folder_contents(
                 dir_element.append(file_element)
         dir_structure_element.append(dir_element)
 
+    if dependencies_element is not None:
+        project_context.append(dependencies_element)
+
     task_element = ET.SubElement(root_element, "task")
     task_element.text = task
 
@@ -232,7 +237,7 @@ def main():
     parser.add_argument(
         "--task",
         help="Task description to be included in the output",
-        default="Describe this project in detail. Pay special attention to the structure of the code, the design of the project, any frameworks/UI frameworks used, and the overall structure/workflow. If artifacts are available, then use workflow and sequence diagrams to help describe the project.",
+        default="Describe this project in detail. Pay special attention to the structure of the code, the design of the project, any frameworks/UI frameworks used, and the overall structure/workflow. If artifacts are available, then display workflow and sequence diagrams to help describe the project.",
     )
     parser.add_argument(
         "--no-auto-detect",
@@ -248,6 +253,12 @@ def main():
         "--save-presets",
         action="store_true",
         help="Save built-in presets to a YAML file",
+    )
+    parser.add_argument(
+        "--analyze-deps",
+        action="store_true",
+        help="Analyze project dependencies",
+        default=True,
     )
     parser.add_argument(
         "-v",
@@ -320,6 +331,12 @@ def main():
     else:
         output = args.output
 
+    # Analyze dependencies if requested
+    dependencies_element = None
+    if args.analyze_deps:
+        logger.info("Analyzing project dependencies...")
+        dependencies_element = analyze_dependencies(args.folder_path)
+
     logger.info(f"Processing folder: {args.folder_path}")
     dump_folder_contents(
         args.folder_path,
@@ -328,6 +345,7 @@ def main():
         combined_preset["exclude"],
         args.gitignore,
         args.task,
+        dependencies_element,
     )
     logger.info("Processing complete")
 

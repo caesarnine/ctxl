@@ -5,10 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ctxl"
 authors = [{name = "Binal Patel", email = "binalkp91@gmail.com"}]
-description = "A CLI tool to dump projects into an LLM ideal format."
+description = "A CLI tool to dump projects into an LLM ideal format with chat functionality."
 readme = "README.md"
 requires-python = ">=3.6"
-keywords = ["cli", "folder", "structure"]
+keywords = ["cli", "folder", "structure", "chat", "AI"]
 license = {text = "Apache-2.0"}
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -18,6 +18,8 @@ classifiers = [
 dependencies = [
     "pathspec",
     "PyYAML",
+    "anthropic",
+    "python-dotenv",
 ]
 dynamic = ["version"]
 
@@ -36,7 +38,7 @@ ctxl = "ctxl.ctxl:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-ctxl = ["py.typed"]
+ctxl = ["py.typed", "system_prompt.txt"]
 
 [tool.pytest.ini_options]
 addopts = "--cov=ctxl"

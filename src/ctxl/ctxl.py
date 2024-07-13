@@ -3,10 +3,11 @@ import logging
 import os
 import sys
 import xml.etree.ElementTree as ET
-from typing import BinaryIO, Dict, List, Set, TextIO, Union
+from typing import Dict, List, Set
 
 import pathspec
 
+from .chat_mode import ChatMode
 from .dependency_analyzer import analyze_dependencies
 from .preset_manager import (
     get_presets,
@@ -123,15 +124,14 @@ def create_file_element(file_path, file_content):
     return file_element
 
 
-def dump_folder_contents(
-    folder_path,
-    output: Union[str, TextIO, BinaryIO],
-    include_patterns,
-    exclude_patterns,
-    gitignore_path,
-    task,
-    dependencies_element=None,
-):
+def generate_xml(
+    folder_path: str,
+    include_patterns: List[str],
+    exclude_patterns: List[str],
+    gitignore_path: str,
+    task: str,
+    analyze_deps: bool,
+) -> str:
     gitignore_patterns = read_gitignore(gitignore_path)
 
     # Create separate PathSpec objects for include and exclude patterns
@@ -187,26 +187,19 @@ def dump_folder_contents(
                 dir_element.append(file_element)
         dir_structure_element.append(dir_element)
 
-    if dependencies_element is not None:
+    if analyze_deps:
+        dependencies_element = analyze_dependencies(folder_path)
         project_context.append(dependencies_element)
 
     task_element = ET.SubElement(root_element, "task")
     task_element.text = task
 
-    tree = ET.ElementTree(root_element)
-
-    if isinstance(output, str):
-        tree.write(output, encoding="utf-8", xml_declaration=True)
-        logger.info(f"Output written to file: {output}")
-    else:
-        # For stdout or other file-like objects
-        xml_string = ET.tostring(root_element, encoding="unicode", xml_declaration=True)
-        output.write(xml_string)
-        logger.info("Output written to stdout")
+    return ET.tostring(root_element, encoding="unicode", xml_declaration=True)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Dump folder contents and structure.")
+
     parser.add_argument(
         "folder_path", nargs="?", help="Path to the folder to be dumped"
     )
@@ -266,6 +259,12 @@ def main():
         action="store_true",
         help="Enable verbose logging",
     )
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Enter interactive mode after generating XML",
+    )
+
     args = parser.parse_args()
 
     setup_logging(args.verbose)
@@ -325,33 +324,35 @@ def main():
     if args.gitignore is None:
         args.gitignore = os.path.join(args.folder_path, ".gitignore")
 
-    # Determine the output stream
+    # Generate XML
+    xml_output = generate_xml(
+        args.folder_path,
+        combined_preset["include"],
+        combined_preset["exclude"],
+        args.gitignore,
+        args.task,
+        args.analyze_deps,
+    )
+
+    # Output XML
     if args.output == "-":
         output = sys.stdout
     else:
         output = args.output
 
-    # Analyze dependencies if requested
-    dependencies_element = None
-    if args.analyze_deps:
-        logger.info("Analyzing project dependencies...")
-        dependencies_element = analyze_dependencies(args.folder_path)
+    if isinstance(output, str):
+        with open(output, "w", encoding="utf-8") as f:
+            f.write(xml_output)
+        logger.info(f"Output written to file: {output}")
+    else:
+        output.write(xml_output)
+        logger.info("Output written to stdout")
 
-    logger.info(f"Processing folder: {args.folder_path}")
-    dump_folder_contents(
-        args.folder_path,
-        output,
-        combined_preset["include"],
-        combined_preset["exclude"],
-        args.gitignore,
-        args.task,
-        dependencies_element,
-    )
-    logger.info("Processing complete")
+    # Enter interactive mode if specified
+    if args.interactive:
+        chat_mode = ChatMode(xml_output)
+        chat_mode.start()
 
 
 if __name__ == "__main__":
     main()
-
-# Explicitly export the main function
-__all__ = ["main"]

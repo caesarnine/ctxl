@@ -1,10 +1,8 @@
 import os
-import re
 import subprocess
-from typing import List, Tuple
 
 import pkg_resources
-from anthropic import Anthropic
+from anthropic import Anthropic, AnthropicBedrock
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,52 +13,139 @@ system_prompt = (
     pkg_resources.resource_string("ctxl", "system_prompt.txt").decode("utf-8").strip()
 )
 
+environment_info = subprocess.run(
+    "cat /etc/os-release", shell=True, check=True, text=True, capture_output=True
+)
+
+shell_info = subprocess.run(
+    "echo $SHELL", shell=True, check=True, text=True, capture_output=True
+)
+
+cwd = os.getcwd()
+
+system_prompt = (
+    "<environment_info>\n"
+    + environment_info.stdout.strip()
+    + f"\nSHELL={shell_info.stdout.strip()}\nCWD={cwd}\n</environment_info>"
+    + "\n"
+    + system_prompt
+)
+
 
 class ChatMode:
-    def __init__(self, xml_context: str):
-        if not ANTHROPIC_API_KEY:
-            raise ValueError("ANTHROPIC_API_KEY not found in environment variables")
+    def __init__(self, xml_context: str, bedrock: bool):
 
-        self.client = Anthropic(api_key=ANTHROPIC_API_KEY)
+        if bedrock:
+            self.client = AnthropicBedrock()
+            self.model = "anthropic.claude-3-5-sonnet-20240620-v1:0"
+        else:
+            if not ANTHROPIC_API_KEY:
+                raise ValueError("ANTHROPIC_API_KEY not found in environment variables")
+            self.client = Anthropic()
+            self.model = "claude-3-5-sonnet-20240620"
         self.xml_context = xml_context
         self.conversation_history = []
+
+    def get_user_confirmation(self, command: str) -> bool:
+        while True:
+            user_input = (
+                input(f"\nAllow execution of command: '{command}'? (y/n): ")
+                .lower()
+                .strip()
+            )
+            if user_input in ["y", "yes"]:
+                return True
+            elif user_input in ["n", "no"]:
+                return False
+            else:
+                print("Invalid input. Please enter 'y' for yes or 'n' for no.")
 
     def get_claude_response(self, user_input: str) -> str:
         self.conversation_history.append({"role": "user", "content": user_input})
 
         try:
-            response = self.client.messages.create(
-                system=system_prompt + f"<cwd>{os.getcwd()}</cwd>",
-                model="claude-3-5-sonnet-20240620",
-                messages=self.conversation_history,
-                max_tokens=4096,
-            )
+            current_response = ""
+            current_command = ""
 
-            assistant_message = response.content[0].text
-            self.conversation_history.append(
-                {"role": "assistant", "content": assistant_message}
-            )
+            while True:
+                with self.client.messages.stream(
+                    system=system_prompt,
+                    model=self.model,
+                    messages=self.conversation_history
+                    + [{"role": "assistant", "content": current_response}],
+                    max_tokens=4096,
+                    stop_sequences=["<command>", "</command>"],
+                ) as stream:
+                    assistant_message = ""
+                    for event in stream:
+                        if event.type == "content_block_delta":
+                            if event.delta.type == "text_delta":
+                                print(event.delta.text, end="", flush=True)
+                                assistant_message += event.delta.text
+                        elif event.type == "message_delta":
+                            if event.delta.stop_reason:
+                                stop_reason = event.delta.stop_reason
+                            if event.delta.stop_sequence:
+                                stop_sequence = event.delta.stop_sequence
 
-            return assistant_message
+                if stop_reason == "end_turn":
+                    self.conversation_history.append(
+                        {
+                            "role": "assistant",
+                            "content": current_response + assistant_message,
+                        }
+                    )
+                    return current_response + assistant_message
+                elif stop_reason == "stop_sequence":
+                    if stop_sequence == "<command>":
+                        current_command = ""
+                        current_response += assistant_message + "<command>"
+                        print("<command>", end="", flush=True)
+                    elif stop_sequence == "</command>":
+                        current_command = assistant_message
+                        print("</command>", flush=True)
+
+                        user_allowed, result = self.execute_command(current_command)
+                        current_response += assistant_message + "</command>\n" + result
+
+                        if not user_allowed:
+                            print(
+                                "Command skipped by user. Continuing conversation...",
+                                flush=True,
+                            )
+                            self.conversation_history.append(
+                                {
+                                    "role": "assistant",
+                                    "content": current_response,
+                                }
+                            )
+                            return current_response
+                        else:
+                            print(result)
+
         except Exception as e:
-            return f"Error communicating with Claude API: {str(e)}"
+            error_message = f"Error communicating with Claude API: {str(e)}"
+            print(error_message)
+            return error_message
 
     @staticmethod
-    def extract_shell_commands(response: str) -> List[Tuple[str, str, str]]:
-        pattern = r"<command(?: id=\"\d+\")?>(.*?)</command>"
-        matches = re.findall(pattern, response, re.DOTALL)
-        command_ids = re.findall(r'<command id="(\d+)">', response)
-        return [
-            (command_id, match.strip(), f"<command>\n{match}\n</command>")
-            for command_id, match in zip(command_ids, matches)
-        ]
+    def execute_command(command: str) -> tuple[bool, str]:
+        user_confirmation = (
+            input(f"Execute command: '{command}'? (y/n): ").strip().lower()
+        )
+        if user_confirmation not in ["y", "yes"]:
+            return (
+                False,
+                """<command_result userskipped="true">\nUser skipped execution.\n</command_result>""",
+            )
 
-    @staticmethod
-    def execute_command(command_id, command: str) -> str:
         result = subprocess.run(
             command, shell=True, check=False, text=True, capture_output=True
         )
-        return f"""<command_result commandid="{command_id}" returncode="{result.returncode}">\n{result.stdout}\n{result.stderr}\n</command_result>"""
+        return (
+            True,
+            f"""<command_result userskipped="false" returncode="{result.returncode}">\n{result.stdout}\n{result.stderr}\n</command_result>""",
+        )
 
     def start(self):
         print(
@@ -87,28 +172,8 @@ class ChatMode:
                     )
                     continue
 
-                response = self.get_claude_response(user_input)
-                print("Claude:", response)
-
-                commands = self.extract_shell_commands(response)
-                for command_id, command, block in commands:
-                    print(f"\nDetected shell command:\n{block}")
-
-                    confirm = (
-                        input("Do you want to execute this command? (y/n): ")
-                        .strip()
-                        .lower()
-                    )
-                    if confirm == "y":
-                        print("Executing command...")
-                        output = self.execute_command(command_id, command)
-                        print("Command output:")
-                        print(output)
-                        # Send the output back to Claude for context
-                        response = self.get_claude_response(output)
-                        print("Claude:", response)
-                    else:
-                        print("Command execution skipped.")
+                self.get_claude_response(user_input)
+                # We don't need to print the response here as it's already printed in get_claude_response
             except KeyboardInterrupt:
                 print("\nKeyboard interrupt detected. Exiting interactive mode.")
                 break

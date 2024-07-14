@@ -265,6 +265,12 @@ def main():
         help="Enter interactive mode after generating XML",
     )
 
+    parser.add_argument(
+        "--bedrock",
+        action="store_true",
+        help="Use AWS Bedrock for Claude API in interactive mode",
+    )
+
     args = parser.parse_args()
 
     setup_logging(args.verbose)
@@ -350,7 +356,10 @@ def main():
 
     # Enter interactive mode if specified
     if args.interactive:
-        chat_mode = ChatMode(xml_output)
+        if args.bedrock:
+            chat_mode = ChatMode(xml_output, bedrock=True)
+        else:
+            chat_mode = ChatMode(xml_output)
         chat_mode.start()
 
 

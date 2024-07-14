@@ -359,7 +359,7 @@ def main():
         if args.bedrock:
             chat_mode = ChatMode(xml_output, bedrock=True)
         else:
-            chat_mode = ChatMode(xml_output)
+            chat_mode = ChatMode(xml_output, bedrock=False)
         chat_mode.start()
 
 

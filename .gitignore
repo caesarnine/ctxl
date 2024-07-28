@@ -163,4 +163,4 @@ cython_debug/
 
 *.xml
 .ctxl*
-.ruff
+.ruff_cache

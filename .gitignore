@@ -162,4 +162,5 @@ cython_debug/
 #.idea/
 
 *.xml
-.ctxl_chats
+.ctxl*
+.ruff

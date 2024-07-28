@@ -6,15 +6,16 @@ import xml.etree.ElementTree as ET
 from typing import Dict, List, Set
 
 import pathspec
+from git import GitCommandError
 
 from .chat_mode import ChatMode
-from .dependency_analyzer import analyze_dependencies
 from .preset_manager import (
     get_presets,
     load_presets,
     save_built_in_presets,
     view_presets,
 )
+from .version_control import initialize_version_control
 
 # Default exclude patterns
 DEFAULT_EXCLUDE = [".*"]  # This will exclude all dotfiles and folders
@@ -130,7 +131,7 @@ def generate_xml(
     exclude_patterns: List[str],
     gitignore_path: str,
     task: str,
-    analyze_deps: bool,
+    include_dotfiles: bool,
 ) -> str:
     gitignore_patterns = read_gitignore(gitignore_path)
 
@@ -148,9 +149,6 @@ def generate_xml(
 
     for root, dirs, files in os.walk(folder_path):
         rel_root = os.path.relpath(root, folder_path)
-        dirs[:] = [
-            d for d in dirs if not exclude_spec.match_file(os.path.join(rel_root, d))
-        ]
         for file in files:
             rel_file_path = os.path.join(rel_root, file)
             if include_spec.match_file(rel_file_path) and not exclude_spec.match_file(
@@ -171,25 +169,25 @@ def generate_xml(
 
     logger.info(f"Processed {file_count} files with {error_count} errors")
 
+    # Generate complete directory structure
     dir_structure_element = ET.SubElement(project_context, "directory_structure")
     for root, dirs, files in os.walk(folder_path):
+        # Skip dotfiles and directories unless include_dotfiles is True
+        if not include_dotfiles:
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            files = [f for f in files if not f.startswith(".")]
+
         rel_root = os.path.relpath(root, folder_path)
-        dirs[:] = [
-            d for d in dirs if not exclude_spec.match_file(os.path.join(rel_root, d))
-        ]
-        dir_element = ET.Element("directory", path=rel_root)
+        if rel_root == ".":
+            dir_element = dir_structure_element
+        else:
+            dir_element = ET.SubElement(
+                dir_structure_element, "directory", path=rel_root
+            )
+
         for file in files:
             rel_file_path = os.path.join(rel_root, file)
-            if include_spec.match_file(rel_file_path) and not exclude_spec.match_file(
-                rel_file_path
-            ):
-                file_element = ET.Element("file", path=rel_file_path)
-                dir_element.append(file_element)
-        dir_structure_element.append(dir_element)
-
-    if analyze_deps:
-        dependencies_element = analyze_dependencies(folder_path)
-        project_context.append(dependencies_element)
+            ET.SubElement(dir_element, "file", path=rel_file_path)
 
     task_element = ET.SubElement(root_element, "task")
     task_element.text = task
@@ -199,6 +197,17 @@ def generate_xml(
 
 def main():
     parser = argparse.ArgumentParser(description="Dump folder contents and structure.")
+    parser.add_argument(
+        "--list-versions",
+        action="store_true",
+        help="List all versions in the project history",
+    )
+    parser.add_argument(
+        "--switch-version", type=str, help="Switch to a specific version (commit hash)"
+    )
+    parser.add_argument(
+        "--create-branch", type=str, help="Create a new branch from the current version"
+    )
 
     parser.add_argument(
         "folder_path", nargs="?", help="Path to the folder to be dumped"
@@ -251,7 +260,7 @@ def main():
         "--analyze-deps",
         action="store_true",
         help="Analyze project dependencies",
-        default=True,
+        default=False,
     )
     parser.add_argument(
         "-v",
@@ -275,6 +284,9 @@ def main():
 
     setup_logging(args.verbose)
 
+    # Initialize version control
+    version_control = initialize_version_control(args.folder_path)
+
     if args.view_presets:
         print(view_presets())
         return
@@ -291,6 +303,34 @@ def main():
         parser.error(
             "folder_path is required unless --view-presets or --save-presets is specified"
         )
+
+    # Handle version control CLI arguments
+    if args.list_versions:
+        history = version_control.get_version_history()
+        for version in history:
+            print(f"Commit: {version['id']}")
+            print(f"Message: {version['message']}")
+            print(f"Author: {version['author']}")
+            print(f"Timestamp: {version['timestamp']}")
+            print(f"Current: {'Yes' if version['is_current'] else 'No'}")
+            print("---")
+        return
+
+    if args.switch_version:
+        try:
+            version_control.switch_to_version(args.switch_version)
+            print(f"Switched to version: {args.switch_version}")
+        except GitCommandError as e:
+            print(f"Error switching version: {e}")
+        return
+
+    if args.create_branch:
+        try:
+            version_control.create_branch(args.create_branch)
+            print(f"Created and switched to new branch: {args.create_branch}")
+        except GitCommandError as e:
+            print(f"Error creating branch: {e}")
+        return
 
     # Load presets from the directory
     current_dir_presets = load_presets(
@@ -337,7 +377,7 @@ def main():
         combined_preset["exclude"],
         args.gitignore,
         args.task,
-        args.analyze_deps,
+        args.include_dotfiles,
     )
 
     # Output XML
@@ -357,9 +397,9 @@ def main():
     # Enter interactive mode if specified
     if args.interactive:
         if args.bedrock:
-            chat_mode = ChatMode(xml_output, bedrock=True)
+            chat_mode = ChatMode(bedrock=args.bedrock, version_control=version_control)
         else:
-            chat_mode = ChatMode(xml_output, bedrock=False)
+            chat_mode = ChatMode(bedrock=args.bedrock, version_control=version_control)
         chat_mode.start()
 
 

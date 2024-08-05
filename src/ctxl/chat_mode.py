@@ -1,10 +1,13 @@
 import argparse
+import contextlib
 import fnmatch
 import json
+import logging
 import os
+import re
 import subprocess
-from collections import defaultdict
 from datetime import datetime
+from io import StringIO
 
 import pkg_resources
 from anthropic import Anthropic, AnthropicBedrock
@@ -15,6 +18,25 @@ from .version_control import VersionControl
 load_dotenv()
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+
+
+@contextlib.contextmanager
+def capture_logs_and_output():
+    log_output = StringIO()
+    handler = logging.StreamHandler(log_output)
+    logger = logging.getLogger()
+    logger.addHandler(handler)
+
+    # Store the original level to restore it later
+    original_level = logger.level
+    logger.setLevel(logging.INFO)
+
+    try:
+        yield log_output
+    finally:
+        logger.removeHandler(handler)
+        # Restore the original logging level
+        logger.setLevel(original_level)
 
 
 def load_gitignore(path):
@@ -97,6 +119,92 @@ def generate_system_prompt():
     return contextualized_system_prompt
 
 
+def apply_diff(file_path, diff_content, logger=None):
+    # Set up logging
+    if logger is None:
+        logging.basicConfig(
+            level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+        )
+        logger = logging.getLogger(__name__)
+
+    # Read the file content
+    try:
+        with open(file_path, "r") as file:
+            file_content = file.read()
+    except IOError as e:
+        logger.error(f"Error reading file {file_path}: {e}")
+        return None
+
+    # Split the file content into lines
+    file_lines = file_content.splitlines()
+
+    # Split the diff into hunks
+    hunks = re.split(r"(?m)^@@.*@@$", diff_content)[1:]
+
+    for i, hunk in enumerate(hunks):
+        logger.info(f"Processing hunk {i + 1}")
+        hunk_lines = hunk.splitlines()
+
+        # Remove empty lines at the start and end of the hunk
+        while hunk_lines and not hunk_lines[0].strip():
+            hunk_lines.pop(0)
+        while hunk_lines and not hunk_lines[-1].strip():
+            hunk_lines.pop()
+
+        if not hunk_lines:
+            logger.warning(f"Hunk {i + 1} is empty")
+            continue
+
+        # Find the start line for this hunk in the file
+        context_before = []
+        for line in hunk_lines:
+            if line.startswith(" "):
+                context_before.append(line[1:])
+            else:
+                break
+
+        start_line = -1
+        for j in range(len(file_lines) - len(context_before) + 1):
+            if file_lines[j : j + len(context_before)] == context_before:
+                start_line = j
+                break
+
+        if start_line == -1:
+            logger.warning(f"Could not find the start of hunk {i + 1}")
+            continue
+
+        # Process the hunk lines
+        j = start_line
+        for hunk_line in hunk_lines:
+            if hunk_line.startswith(" "):
+                j += 1
+            elif hunk_line.startswith("-"):
+                if file_lines[j].strip() != hunk_line[1:].strip():
+                    logger.warning(
+                        f"Mismatch in hunk {i + 1}, expected '{hunk_line[1:].strip()}', found '{file_lines[j].strip()}'"
+                    )
+                file_lines.pop(j)
+            elif hunk_line.startswith("+"):
+                file_lines.insert(j, hunk_line[1:])
+                j += 1
+
+        logger.info(f"Hunk {i + 1} applied successfully")
+
+    # Join the lines back into a single string
+    result = "\n".join(file_lines)
+
+    # Write the result back to the file
+    try:
+        with open(file_path, "w") as file:
+            file.write(result)
+        logger.info(f"Updated content written to {file_path}")
+    except IOError as e:
+        logger.error(f"Error writing to file {file_path}: {e}")
+        return None
+
+    return result
+
+
 class ChatMode:
     def __init__(self, bedrock: bool, version_control: VersionControl):
         if bedrock:
@@ -114,88 +222,54 @@ class ChatMode:
         self.session_branch = None
         os.makedirs(self.chat_dir, exist_ok=True)
 
-    def format_diff(
-        self, diff: str, max_lines: int = 50, context_lines: int = 3
-    ) -> str:
+    def execute_with_versioning(
+        self, command: str, user_initiated: bool = False, is_diff: bool = False
+    ) -> tuple[bool, str]:
+        if not user_initiated:
+            user_confirmation = (
+                input(f"Execute command: '{command}'? (y/n): ").strip().lower()
+            )
+            if user_confirmation not in ["y", "yes"]:
+                return (
+                    False,
+                    """<result userskipped="true">\nUser skipped execution.\n</result>""",
+                )
 
-        # ANSI color codes
-        RED = "\033[91m"
-        GREEN = "\033[92m"
-        YELLOW = "\033[93m"
-        RESET = "\033[0m"
+            if not is_diff:
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    check=False,
+                    text=True,
+                    capture_output=True,
+                    executable="/bin/bash",
+                )
 
-        lines = diff.split("\n")
-        formatted_lines = []
-        file_changes = defaultdict(lambda: {"added": 0, "removed": 0})
-        current_file = None
-        changes_count = 0
+                # Create a new commit in the session branch
+                commit_hash = self.version_control.create_new_version(
+                    f"Executed command: {command}", branch=self.session_branch
+                )
 
-        for line in lines:
-            if line.startswith("diff --git"):
-                current_file = line.split()[-1].lstrip("b/")
-                formatted_lines.append(f"\n{YELLOW}{line}{RESET}")
-            elif line.startswith("+++") or line.startswith("---"):
-                formatted_lines.append(f"{YELLOW}{line}{RESET}")
-            elif line.startswith("+"):
-                file_changes[current_file]["added"] += 1
-                changes_count += 1
-                formatted_lines.append(f"{GREEN}{line}{RESET}")
-            elif line.startswith("-"):
-                file_changes[current_file]["removed"] += 1
-                changes_count += 1
-                formatted_lines.append(f"{RED}{line}{RESET}")
-            elif line.startswith("@@"):
-                formatted_lines.append(f"{YELLOW}{line}{RESET}")
+                output = f"""<result userskipped="false" returncode="{result.returncode}" commit_hash="{commit_hash}">\n{result.stdout}\n{result.stderr}\n</result>"""
             else:
-                formatted_lines.append(line)
+                target_pattern = r"<target>(.*?)</target>"
+                content_pattern = r"<content>(.*?)</content>"
 
-        # Summarize changes
-        summary = [f"{YELLOW}Changes summary:{RESET}"]
-        for file, changes in file_changes.items():
-            summary.append(f"  {file}: +{changes['added']} -{changes['removed']}")
-        summary.append(f"Total: {changes_count} lines changed")
+                target_match = re.search(target_pattern, command, re.DOTALL)
+                target_path = target_match.group(1) if target_match else None
 
-        # Limit output for large diffs
-        if len(formatted_lines) > max_lines:
-            context_start = max(0, (max_lines - context_lines) // 2)
-            context_end = max(
-                0, len(formatted_lines) - (max_lines - context_lines) // 2
-            )
-            formatted_lines = (
-                formatted_lines[:context_start]
-                + [
-                    f"{YELLOW}... ({len(formatted_lines) - max_lines} lines skipped) ...{RESET}"
-                ]
-                + formatted_lines[context_end:]
-            )
+                # Find the content
+                content_match = re.search(content_pattern, command, re.DOTALL)
+                diff_content = content_match.group(1).strip() if content_match else None
 
-        return "\n".join(summary + ["\n"] + formatted_lines)
+                with capture_logs_and_output() as log_output:
+                    result = apply_diff(target_path, diff_content, logger=logging)
 
-    def execute_command_with_versioning(self, command: str) -> tuple[bool, str]:
-        user_confirmation = (
-            input(f"Execute command: '{command}'? (y/n): ").strip().lower()
-        )
-        if user_confirmation not in ["y", "yes"]:
-            return (
-                False,
-                """<command_result userskipped="true">\nUser skipped execution.\n</command_result>""",
-            )
+                commit_hash = self.version_control.create_new_version(
+                    f"Applied diff to {target_path}", branch=self.session_branch
+                )
 
-        result = subprocess.run(
-            command,
-            shell=True,
-            check=False,
-            text=True,
-            capture_output=True,
-            executable="/bin/bash",
-        )
-
-        # Create a new commit in the session branch
-        commit_hash = self.version_control.create_new_version(
-            f"Executed command: {command}", branch=self.session_branch
-        )
-
-        output = f"""<command_result userskipped="false" returncode="{result.returncode}" commit_hash="{commit_hash}">\n{result.stdout}\n{result.stderr}\n</command_result>"""
+                output = f"""<result userskipped="false" commit_hash="{commit_hash}">\n<logs>\n{log_output.getvalue()}\n</logs>\n<edited_file>\n{result}\n</edited_file></result>"""
 
         return (True, output)
 
@@ -214,7 +288,7 @@ class ChatMode:
                     messages=self.conversation_history
                     + [{"role": "assistant", "content": current_response}],
                     max_tokens=4096,
-                    stop_sequences=["<command>", "</command>"],
+                    stop_sequences=["<command>", "</command>", "<diff>", "</diff>"],
                 ) as stream:
                     assistant_message = ""
                     for event in stream:
@@ -246,7 +320,7 @@ class ChatMode:
                         current_command = assistant_message
                         print("</command>", flush=True)
 
-                        user_allowed, result = self.execute_command_with_versioning(
+                        user_allowed, result = self.execute_with_versioning(
                             current_command
                         )
                         print(result, end="", flush=True)
@@ -255,6 +329,35 @@ class ChatMode:
                         if not user_allowed:
                             print(
                                 "Command skipped by user. Continuing conversation...",
+                                flush=True,
+                            )
+                            self.conversation_history.append(
+                                {
+                                    "role": "assistant",
+                                    "content": current_response,
+                                }
+                            )
+                            self.save_chat()
+                            return current_response
+
+                    elif stop_sequence == "<diff>":
+                        current_diff = ""
+                        current_response += assistant_message + "<diff>"
+                        print("<diff>", end="", flush=True)
+                    elif stop_sequence == "</diff>":
+                        current_diff = assistant_message
+                        print("</diff>", flush=True)
+                        current_diff = "<diff>\n" + current_diff + "</diff>\n"
+
+                        user_allowed, result = self.execute_with_versioning(
+                            current_diff, is_diff=True
+                        )
+                        print(result, end="", flush=True)
+                        current_response += assistant_message + "</diff>\n" + result
+
+                        if not user_allowed:
+                            print(
+                                "Diff not applied by user. Continuing conversation...",
                                 flush=True,
                             )
                             self.conversation_history.append(
@@ -285,9 +388,26 @@ class ChatMode:
         else:
             print("Starting a new chat.")
 
+        full_user_input = ""
         while True:
             try:
                 user_input = input("User: ").strip()
+                full_user_input += user_input + "\n"
+
+                if user_input.startswith("!"):
+                    command = user_input[1:].strip()
+                    _, result = self.execute_with_versioning(
+                        command, user_initiated=True
+                    )
+                    # self.conversation_history.append(
+                    #     {
+                    #         "role": "user",
+                    #         "content": f"<command>{command}</command>\n{result}",
+                    #     }
+                    # )
+                    full_user_input += f"<command>{command}</command>\n{result}\n"
+                    print(result)
+                    continue
 
                 if user_input.lower() == "exit":
                     print("Exiting interactive mode. Goodbye!")
@@ -296,12 +416,14 @@ class ChatMode:
                     print("Available commands:")
                     print("  exit: Exit interactive mode")
                     print("  help: Display this help message")
+                    print("  !<bash_command>: Execute a bash command directly")
                     print(
                         "Any other input will be sent to Claude Sonnet for processing."
                     )
                     continue
 
-                self.get_claude_response(user_input)
+                self.get_claude_response(full_user_input)
+                full_user_input = ""
                 # We don't need to print the response here as it's already printed in get_claude_response
             except KeyboardInterrupt:
                 print("\nKeyboard interrupt detected. Exiting interactive mode.")

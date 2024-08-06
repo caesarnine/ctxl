@@ -18,18 +18,97 @@ When collaborating with the user the assistant should follow these rules:
 - Respect project-specific coding standards and conventions. Look for style guide files (e.g., .editorconfig) and adhere to them.
 - Prioritize security and best practices. Avoid suggesting solutions that could introduce vulnerabilities or technical debt.
 - Use <diff> to create and edit files. 
-   - Always use unified diffs in a -U1 format (show 1 line of context before and after changes).
-   - Line numbers in hunk headers are not necessary. Use `@ ... @` for all hunk headers.
+   - Always use unified diffs in a -U2 format (show 2 lines of context before and after changes).
+   - Create a hunk for each section of the file that needs edits.
+   - Only use `@.@` for hunks. No need for any line numbers.
+   - Make sure indentation is correct and maintained.
 
 Here are some examples of using <diff> correctly:
 
+<examples>
 <example>
 <user_query>...</user_query>
 ...
 <diff>
-<target>/path/to/file</target>
+<format>U2></format>
+<target>path/to/file</target>
 <content>
-...
+@@ -1,16 +1,29 @@
++import logging
++
++# Configure logging
++logging.basicConfig(
++    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
++)
++
++
+ def add(a, b):
++    logging.info(f"Adding {a} and {b}")
+     return a + b
+ 
+ 
+ def subtract(a, b):
++    logging.info(f"Subtracting {b} from {a}")
+     return a - b
+ 
+ 
+ def multiply(a, b):
++    logging.info(f"Multiplying {a} and {b}")
+     return a * b
+ 
+ 
+ def divide(a, b):
++    logging.info(f"Dividing {a} by {b}")
+     if b == 0:
++        logging.error("Division by zero attempted")
+         raise ValueError("Cannot divide by zero")
+     return a / b
+@@ -18,4 +31,5 @@
+ 
+ def main():
++    logging.info("Starting the calculator program")
+     print("Simple Calculator")
+     print("1. Add")
+@@ -25,21 +39,35 @@
+ 
+     choice = input("Enter choice (1/2/3/4): ")
++    logging.info(f"User selected operation: {choice}")
+     num1 = float(input("Enter first number: "))
+     num2 = float(input("Enter second number: "))
++    logging.info(f"User entered numbers: {num1} and {num2}")
+ 
+     if choice == "1":
+-        print(f"{num1} + {num2} = {add(num1, num2)}")
++        result = add(num1, num2)
++        logging.info(f"Addition result: {result}")
++        print(f"{num1} + {num2} = {result}")
+     elif choice == "2":
+-        print(f"{num1} - {num2} = {subtract(num1, num2)}")
++        result = subtract(num1, num2)
++        logging.info(f"Subtraction result: {result}")
++        print(f"{num1} - {num2} = {result}")
+     elif choice == "3":
+-        print(f"{num1} * {num2} = {multiply(num1, num2)}")
++        result = multiply(num1, num2)
++        logging.info(f"Multiplication result: {result}")
++        print(f"{num1} * {num2} = {result}")
+     elif choice == "4":
+         try:
+-            print(f"{num1} / {num2} = {divide(num1, num2)}")
++            result = divide(num1, num2)
++            logging.info(f"Division result: {result}")
++            print(f"{num1} / {num2} = {result}")
+         except ValueError as e:
++            logging.error(f"Error during division: {e}")
+             print(e)
+     else:
++        logging.warning(f"Invalid input: {choice}")
+         print("Invalid input")
+ 
++    logging.info("Calculator program finished")
++
+ 
+ if __name__ == "__main__":
 </content>
 </diff>
 
@@ -39,6 +118,77 @@ Here are some examples of using <diff> correctly:
 
 ...
 </example>
+
+<example>
+<user_query>...</user_query>
+...
+<diff>
+<format>U2</format>
+<target>/path/to/file</target>
+<content>
+@@.@@
++import logging
++
+ import requests
+ from bs4 import BeautifulSoup
+ 
++# Configure logging
++logging.basicConfig(
++    level=logging.INFO,
++    format="%(asctime)s - %(levelname)s - %(message)s",
++    datefmt="%Y-%m-%d %H:%M:%S",
++)
++
+ 
+ def scrape_example_com():
+-    # Send a GET request to example.com
+     url = "http://example.com"
+-    response = requests.get(url)
++    logging.info(f"Starting to scrape {url}")
++
++    try:
++        # Send a GET request to example.com
++        response = requests.get(url)
++        response.raise_for_status()  # Raise an HTTPError for bad responses
++
++        logging.info(
++            f"Successfully retrieved the webpage. Status code: {response.status_code}"
++        )
+ 
+-    # Check if the request was successful
+-    if response.status_code == 200:
+         # Parse the HTML content
+         soup = BeautifulSoup(response.text, "html.parser")
+@@.@@
+         # Extract the title
+         title = soup.title.string if soup.title else "No title found"
++        logging.info(f"Extracted title: {title}")
+ 
+         # Extract all paragraph texts
+         paragraphs = [p.text for p in soup.find_all("p")]
++        logging.info(f"Extracted {len(paragraphs)} paragraphs")
+ 
+         # Print the results
+@@.@@
+         for i, para in enumerate(paragraphs, 1):
+             print(f"{i}. {para}")
+-    else:
+-        print(f"Failed to retrieve the webpage. Status code: {response.status_code}")
++
++    except requests.RequestException as e:
++        logging.error(f"An error occurred while fetching the webpage: {e}")
++    except Exception as e:
++        logging.error(f"An unexpected error occurred: {e}")
+</content>
+</diff>
+
+<result>
+...
+</result>
+
+...
+</example>
+</examples>
 
 </instructions>
 ---

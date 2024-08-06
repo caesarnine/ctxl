@@ -127,16 +127,22 @@ def apply_diff(file_path, diff_content, logger=None):
         )
         logger = logging.getLogger(__name__)
 
-    # Read the file content
-    try:
-        with open(file_path, "r") as file:
-            file_content = file.read()
-    except IOError as e:
-        logger.error(f"Error reading file {file_path}: {e}")
-        return None
+    # Check if the file exists
+    file_exists = os.path.exists(file_path)
 
-    # Split the file content into lines
-    file_lines = file_content.splitlines()
+    if file_exists:
+        # Read the file content
+        try:
+            with open(file_path, "r") as file:
+                file_content = file.read()
+            file_lines = file_content.splitlines()
+        except IOError as e:
+            logger.error(f"Error reading file {file_path}: {e}")
+            return None
+    else:
+        # If the file doesn't exist, start with an empty list of lines
+        logger.info(f"File {file_path} does not exist. Creating a new file.")
+        file_lines = []
 
     # Split the diff into hunks
     hunks = re.split(r"(?m)^@@.*@@$", diff_content)[1:]
@@ -155,35 +161,49 @@ def apply_diff(file_path, diff_content, logger=None):
             logger.warning(f"Hunk {i + 1} is empty")
             continue
 
-        # Find the start line for this hunk in the file
-        context_before = []
-        for line in hunk_lines:
-            if line.startswith(" "):
-                context_before.append(line[1:])
-            else:
-                break
+        if file_exists:
+            # Find the start line for this hunk in the file
+            context_before = []
+            for line in hunk_lines:
+                if line.startswith(" "):
+                    context_before.append(line[1:])
+                else:
+                    break
 
-        start_line = -1
-        for j in range(len(file_lines) - len(context_before) + 1):
-            if file_lines[j : j + len(context_before)] == context_before:
-                start_line = j
-                break
+            start_line = -1
+            for j in range(len(file_lines) - len(context_before) + 1):
+                if file_lines[j : j + len(context_before)] == context_before:
+                    start_line = j
+                    break
 
-        if start_line == -1:
-            logger.warning(f"Could not find the start of hunk {i + 1}")
-            continue
+            if start_line == -1:
+                logger.warning(f"Could not find the start of hunk {i + 1}")
+                continue
 
-        # Process the hunk lines
-        j = start_line
+            # Process the hunk lines
+            j = start_line
+        else:
+            # For new files, start applying changes from the beginning
+            j = 0
+
         for hunk_line in hunk_lines:
             if hunk_line.startswith(" "):
-                j += 1
+                if file_exists:
+                    j += 1
+                else:
+                    file_lines.append(hunk_line[1:])
+                    j += 1
             elif hunk_line.startswith("-"):
-                if file_lines[j].strip() != hunk_line[1:].strip():
+                if file_exists:
+                    if file_lines[j].strip() != hunk_line[1:].strip():
+                        logger.warning(
+                            f"Mismatch in hunk {i + 1}, expected '{hunk_line[1:].strip()}', found '{file_lines[j].strip()}'"
+                        )
+                    file_lines.pop(j)
+                else:
                     logger.warning(
-                        f"Mismatch in hunk {i + 1}, expected '{hunk_line[1:].strip()}', found '{file_lines[j].strip()}'"
+                        f"Unexpected removal in new file creation: {hunk_line}"
                     )
-                file_lines.pop(j)
             elif hunk_line.startswith("+"):
                 file_lines.insert(j, hunk_line[1:])
                 j += 1
@@ -197,7 +217,9 @@ def apply_diff(file_path, diff_content, logger=None):
     try:
         with open(file_path, "w") as file:
             file.write(result)
-        logger.info(f"Updated content written to {file_path}")
+        logger.info(
+            f"{'Updated' if file_exists else 'Created'} content written to {file_path}"
+        )
     except IOError as e:
         logger.error(f"Error writing to file {file_path}: {e}")
         return None

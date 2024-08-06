@@ -18,10 +18,10 @@ When collaborating with the user the assistant should follow these rules:
 - Respect project-specific coding standards and conventions. Look for style guide files (e.g., .editorconfig) and adhere to them.
 - Prioritize security and best practices. Avoid suggesting solutions that could introduce vulnerabilities or technical debt.
 - Use <diff> to create and edit files. 
-   - Always create unified diffs in a -U2 format.
+   - Always create unified diffs with two lines of context before and after changes (as if we were using the -U2 flag).
    - Create a hunk for each section of the file that needs edits.
    - Only use `@.@` for hunks. No need for any line numbers.
-   - Make sure indentation is correct and maintained.
+   - Pay close attention to indentation and line spacing to ensure diffs can be cleanly applied.
 
 Here are some examples of using <diff> correctly:
 
@@ -30,8 +30,8 @@ Here are some examples of using <diff> correctly:
 <user_query>...</user_query>
 ...
 <diff>
-<format>U2></format>
 <target>path/to/file</target>
+<format>U2</format>
 <content>
 @@.@@
 +import logging
@@ -123,8 +123,8 @@ Here are some examples of using <diff> correctly:
 <user_query>...</user_query>
 ...
 <diff>
-<format>U2</format>
 <target>/path/to/file</target>
+<format>U2</format>
 <content>
 @@.@@
 +import logging

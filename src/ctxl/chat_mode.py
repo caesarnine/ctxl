@@ -8,12 +8,17 @@ import re
 import subprocess
 from datetime import datetime
 from io import StringIO
+from pathlib import Path
 
 import pkg_resources
 from anthropic import Anthropic, AnthropicBedrock
+from diff_match_patch import diff_match_patch
 from dotenv import load_dotenv
 
 from .version_control import VersionControl
+
+dmp = diff_match_patch()
+dmp.Match_Distance = 1000000
 
 load_dotenv()
 
@@ -119,112 +124,62 @@ def generate_system_prompt():
     return contextualized_system_prompt
 
 
-def apply_diff(file_path, diff_content, logger=None):
-    # Set up logging
-    if logger is None:
-        logging.basicConfig(
-            level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+def parse_diff(diff_text):
+    lines = diff_text.split("\n")
+    diffs = []
+    current_hunk = []
+    for line in lines:
+        if line.startswith("@@"):
+            if current_hunk:
+                diffs.append(current_hunk)
+            current_hunk = []
+        if line.startswith(" "):
+            current_hunk.append((0, line[1:] + "\n"))
+        elif line.startswith("+"):
+            current_hunk.append((1, line[1:] + "\n"))
+        elif line.startswith("-"):
+            current_hunk.append((-1, line[1:] + "\n"))
+
+    if current_hunk:
+        dmp.diff_cleanupSemanticLossless(current_hunk)
+        dmp.diff_cleanupMerge(current_hunk)
+        dmp.diff_cleanupEfficiency(current_hunk)
+        diffs.append(current_hunk)
+
+    return diffs
+
+
+def apply_diff(file_path, diff_text):
+    p = Path(file_path)
+
+    # to handle the case where it's a diff for a new file
+    if not p.exists():
+        p.touch()
+
+    with p.open("r") as f:
+        text = f.read()
+
+    hunk_diffs = parse_diff(diff_text)
+    hunk_patches = [dmp.patch_make(hunk) for hunk in hunk_diffs]
+
+    failed_hunks = []
+
+    for i, patch in enumerate(hunk_patches, 1):
+        text, applied_successfully = dmp.patch_apply(patch, text)
+
+        if not all(applied_successfully):
+            failed_hunks.append(i)
+
+    if failed_hunks:
+        failed_hunks = "\n".join(map(str, failed_hunks))
+        return (
+            f"Failed to apply hunk(s): {failed_hunks}. The file has not been modified."
         )
-        logger = logging.getLogger(__name__)
 
-    # Check if the file exists
-    file_exists = os.path.exists(file_path)
+    with p.open("w") as f:
+        f.write(text)
 
-    if file_exists:
-        # Read the file content
-        try:
-            with open(file_path, "r") as file:
-                file_content = file.read()
-            file_lines = file_content.splitlines()
-        except IOError as e:
-            logger.error(f"Error reading file {file_path}: {e}")
-            return None
-    else:
-        # If the file doesn't exist, start with an empty list of lines
-        logger.info(f"File {file_path} does not exist. Creating a new file.")
-        file_lines = []
-
-    # Split the diff into hunks
-    hunks = re.split(r"(?m)^@@.*@@$", diff_content)[1:]
-
-    for i, hunk in enumerate(hunks):
-        logger.info(f"Processing hunk {i + 1}")
-        hunk_lines = hunk.splitlines()
-
-        # Remove empty lines at the start and end of the hunk
-        while hunk_lines and not hunk_lines[0].strip():
-            hunk_lines.pop(0)
-        while hunk_lines and not hunk_lines[-1].strip():
-            hunk_lines.pop()
-
-        if not hunk_lines:
-            logger.warning(f"Hunk {i + 1} is empty")
-            continue
-
-        if file_exists:
-            # Find the start line for this hunk in the file
-            context_before = []
-            for line in hunk_lines:
-                if line.startswith(" "):
-                    context_before.append(line[1:])
-                else:
-                    break
-
-            start_line = -1
-            for j in range(len(file_lines) - len(context_before) + 1):
-                if file_lines[j : j + len(context_before)] == context_before:
-                    start_line = j
-                    break
-
-            if start_line == -1:
-                logger.warning(f"Could not find the start of hunk {i + 1}")
-                continue
-
-            # Process the hunk lines
-            j = start_line
-        else:
-            # For new files, start applying changes from the beginning
-            j = 0
-
-        for hunk_line in hunk_lines:
-            if hunk_line.startswith(" "):
-                if file_exists:
-                    j += 1
-                else:
-                    file_lines.append(hunk_line[1:])
-                    j += 1
-            elif hunk_line.startswith("-"):
-                if file_exists:
-                    if file_lines[j].strip() != hunk_line[1:].strip():
-                        logger.warning(
-                            f"Mismatch in hunk {i + 1}, expected '{hunk_line[1:].strip()}', found '{file_lines[j].strip()}'"
-                        )
-                    file_lines.pop(j)
-                else:
-                    logger.warning(
-                        f"Unexpected removal in new file creation: {hunk_line}"
-                    )
-            elif hunk_line.startswith("+"):
-                file_lines.insert(j, hunk_line[1:])
-                j += 1
-
-        logger.info(f"Hunk {i + 1} applied successfully")
-
-    # Join the lines back into a single string
-    result = "\n".join(file_lines)
-
-    # Write the result back to the file
-    try:
-        with open(file_path, "w") as file:
-            file.write(result)
-        logger.info(
-            f"{'Updated' if file_exists else 'Created'} content written to {file_path}"
-        )
-    except IOError as e:
-        logger.error(f"Error writing to file {file_path}: {e}")
-        return None
-
-    return result
+    return text
 
 
 class ChatMode:
@@ -256,10 +211,24 @@ class ChatMode:
                     False,
                     """<result userskipped="true">\nUser skipped execution.\n</result>""",
                 )
+            target_pattern = r"<target>(.*?)</target>"
+            content_pattern = r"<content>(.*?)</content>"
+            purpose_pattern = r"<purpose>(.*?)</purpose>"
+
+            target_match = re.search(target_pattern, command, re.DOTALL)
+            target_path = target_match.group(1) if target_match else None
+
+            # Find the content
+            content_match = re.search(content_pattern, command, re.DOTALL)
+            content = content_match.group(1).strip() if content_match else None
+
+            # Find the purpose
+            purpose_match = re.search(purpose_pattern, command, re.DOTALL)
+            purpose = purpose_match.group(1).strip() if purpose_match else None
 
             if not is_diff:
                 result = subprocess.run(
-                    command,
+                    content,
                     shell=True,
                     check=False,
                     text=True,
@@ -267,28 +236,24 @@ class ChatMode:
                     executable="/bin/bash",
                 )
 
+                commit_message = purpose if purpose else f"Executed command: {command}"
+
                 # Create a new commit in the session branch
                 commit_hash = self.version_control.create_new_version(
-                    f"Executed command: {command}", branch=self.session_branch
+                    commit_message, branch=self.session_branch
                 )
 
                 output = f"""<result userskipped="false" returncode="{result.returncode}" commit_hash="{commit_hash}">\n{result.stdout}\n{result.stderr}\n</result>"""
             else:
-                target_pattern = r"<target>(.*?)</target>"
-                content_pattern = r"<content>(.*?)</content>"
-
-                target_match = re.search(target_pattern, command, re.DOTALL)
-                target_path = target_match.group(1) if target_match else None
-
-                # Find the content
-                content_match = re.search(content_pattern, command, re.DOTALL)
-                diff_content = content_match.group(1).strip() if content_match else None
+                commit_message = (
+                    purpose if purpose else f"Applied diff to {target_path}"
+                )
 
                 with capture_logs_and_output() as log_output:
-                    result = apply_diff(target_path, diff_content, logger=logging)
+                    result = apply_diff(target_path, content)
 
                 commit_hash = self.version_control.create_new_version(
-                    f"Applied diff to {target_path}", branch=self.session_branch
+                    purpose, branch=self.session_branch
                 )
 
                 output = f"""<result userskipped="false" commit_hash="{commit_hash}">\n<logs>\n{log_output.getvalue()}\n</logs>\n<edited_file>\n{result}\n</edited_file></result>"""
@@ -421,12 +386,6 @@ class ChatMode:
                     _, result = self.execute_with_versioning(
                         command, user_initiated=True
                     )
-                    # self.conversation_history.append(
-                    #     {
-                    #         "role": "user",
-                    #         "content": f"<command>{command}</command>\n{result}",
-                    #     }
-                    # )
                     full_user_input += f"<command>{command}</command>\n{result}\n"
                     print(result)
                     continue

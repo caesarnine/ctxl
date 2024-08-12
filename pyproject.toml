@@ -20,6 +20,7 @@ dependencies = [
     "PyYAML",
     "anthropic",
     "python-dotenv",
+    "ruff",
 ]
 dynamic = ["version"]
 
@@ -30,7 +31,7 @@ dynamic = ["version"]
 "Documentation" = "https://github.com/caesarnine/ctxl#readme"
 
 [project.scripts]
-ctxl = "ctxl.ctxl:main"
+ctxl = "ctxl.cli:main"
 
 [tool.setuptools_scm]
 

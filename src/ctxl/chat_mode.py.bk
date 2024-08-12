@@ -1,21 +1,20 @@
 import argparse
 import contextlib
-import fnmatch
 import json
 import logging
 import os
 import re
 import subprocess
-from datetime import datetime  # Ensure this import remains
-from difflib import unified_diff
+from datetime import datetime
 from io import StringIO
-from pathlib import Path
 
 import pkg_resources
 from anthropic import Anthropic, AnthropicBedrock
 from diff_match_patch import diff_match_patch
 from dotenv import load_dotenv
 
+from .utils.diff_utils import apply_diff
+from .utils.file_utils import generate_tree
 from .version_control import VersionControl
 
 # Add logging configuration
@@ -50,53 +49,6 @@ def capture_logs_and_output():
         logger.removeHandler(handler)
         # Restore the original logging level
         logger.setLevel(original_level)
-
-
-def load_gitignore(path):
-    gitignore = set()
-    gitignore_path = os.path.join(path, ".gitignore")
-    if os.path.exists(gitignore_path):
-        with open(gitignore_path, "r") as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    gitignore.add(line)
-    return gitignore
-
-
-def should_ignore(path, name, gitignore, ignore_dotfiles):
-    if ignore_dotfiles and name.startswith("."):
-        return True
-    if gitignore:
-        for pattern in gitignore:
-            if fnmatch.fnmatch(name, pattern) or fnmatch.fnmatch(
-                os.path.join(path, name), pattern
-            ):
-                return True
-    return False
-
-
-def generate_tree(startpath, max_depth=3, ignore_dotfiles=True, use_gitignore=True):
-    gitignore = load_gitignore(startpath) if use_gitignore else set()
-    tree = []
-    for root, dirs, files in os.walk(startpath):
-        level = root.replace(startpath, "").count(os.sep)
-        if level > max_depth:
-            continue
-        indent = "│   " * (level)
-        tree.append(f"{indent}├── {os.path.basename(root)}/")
-        subindent = "│   " * (level + 1)
-
-        dirs[:] = [
-            d for d in dirs if not should_ignore(root, d, gitignore, ignore_dotfiles)
-        ]
-        files = [
-            f for f in files if not should_ignore(root, f, gitignore, ignore_dotfiles)
-        ]
-
-        for f in files:
-            tree.append(f"{subindent}├── {f}")
-    return "\n".join(tree)
 
 
 cwd = os.getcwd()
@@ -138,124 +90,6 @@ def lint_and_format_code(path=".") -> str:
         command, shell=True, check=False, text=True, capture_output=True
     )
     return f"<lint_result>\n{result.stdout}\n{result.stderr}\n</lint_result>"
-
-
-def parse_diff(diff_text):
-    lines = diff_text.split("\n")
-    diffs = []
-    current_hunk = []
-    for line in lines:
-        # ignore the file headers
-        if line.startswith("---") or line.startswith("+++"):
-            continue
-        if line.startswith("@@"):
-            if current_hunk:
-                diffs.append(current_hunk)
-            current_hunk = []
-        if line.startswith(" "):
-            current_hunk.append((0, line[1:] + "\n"))
-        elif line.startswith("+"):
-            current_hunk.append((1, line[1:] + "\n"))
-        elif line.startswith("-"):
-            current_hunk.append((-1, line[1:] + "\n"))
-
-    if current_hunk:
-        dmp.diff_cleanupSemanticLossless(current_hunk)
-        dmp.diff_cleanupMerge(current_hunk)
-        dmp.diff_cleanupEfficiency(current_hunk)
-        diffs.append(current_hunk)
-
-    return diffs
-
-
-def save_snapshot(
-    file_path: Path,
-    original_content: str,
-    applied_diff: str,
-    updated_content: str,
-    unified_diff: str,
-    lint_output: str,
-):
-    ctxl_dir = Path.cwd() / ".ctxl"
-    ctxl_dir.mkdir(exist_ok=True)
-
-    timestamp = datetime.now().isoformat(timespec="seconds").replace(":", "-")
-    snapshot_file = ctxl_dir / f"snapshot_{timestamp}.json"
-
-    snapshot_data = {
-        "file_path": str(file_path),
-        "original_content": original_content,
-        "applied_diff": applied_diff,
-        "updated_content": updated_content,
-        "post_diff": unified_diff,
-        "lint_output": lint_output,
-        "timestamp": timestamp,
-    }
-
-    with snapshot_file.open("w") as f:
-        json.dump(snapshot_data, f, indent=2)
-
-
-def apply_diff(file_path: Path, diff_text: str) -> str:
-    file_path = Path(file_path)  # Ensure file_path is a Path object
-
-    # to handle the case where it's a diff for a new file
-    if not file_path.exists():
-        file_path.touch()
-
-    with file_path.open("r") as f:
-        original_content = f.read()
-
-    # Generate unified diff
-    hunk_diffs = parse_diff(diff_text)
-    hunk_patches = [dmp.patch_make(hunk) for hunk in hunk_diffs]
-
-    failed_hunks = []
-    text = original_content
-
-    for i, patch in enumerate(hunk_patches, 1):
-        text, applied_successfully = dmp.patch_apply(patch, text)
-
-        if not all(applied_successfully):
-            failed_hunks.append(str(i))
-
-    if failed_hunks:
-        failed_hunks_str = ", ".join(failed_hunks)
-        return f"Failed to apply hunk(s): {failed_hunks_str}. The file has not been modified."
-
-    with file_path.open("w") as f:
-        f.write(text)
-
-    lint_output = lint_and_format_code()
-
-    with file_path.open("r") as f:
-        updated_content = f.read()
-
-    # Generate unified diff
-    unified_diff_lines = list(
-        unified_diff(
-            original_content.splitlines(keepends=True),
-            updated_content.splitlines(keepends=True),
-            fromfile=str(file_path),
-            tofile=str(file_path),
-            lineterm="",
-        )
-    )
-    unified_diff_text = "".join(unified_diff_lines)
-
-    with file_path.open("w") as f:
-        f.write(text)
-
-    # Save snapshot after applying the diff
-    save_snapshot(
-        file_path,
-        original_content,
-        diff_text,
-        updated_content,
-        unified_diff_text,
-        lint_output,
-    )
-    return updated_content
 
 
 class ChatMode:
@@ -349,7 +183,7 @@ class ChatMode:
         else:
             commit_message = purpose if purpose else f"Applied diff to {target_path}"
 
-            result = apply_diff(target_path, content)
+            result, unified_diff = apply_diff(target_path, content)
 
             commit_hash = self.version_control.create_new_version(
                 purpose,
@@ -539,6 +373,7 @@ class ChatMode:
             if not self.loaded_chat_path
             else self.loaded_chat_path
         )
+        self.loaded_chat_path = filepath
         with open(filepath, "w") as f:
             json.dump(self.conversation_history, f)
 

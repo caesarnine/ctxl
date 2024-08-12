@@ -6,7 +6,8 @@ import logging
 import os
 import re
 import subprocess
-from datetime import datetime
+from datetime import datetime  # Ensure this import remains
+from difflib import unified_diff
 from io import StringIO
 from pathlib import Path
 
@@ -16,6 +17,13 @@ from diff_match_patch import diff_match_patch
 from dotenv import load_dotenv
 
 from .version_control import VersionControl
+
+# Add logging configuration
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("botocore").setLevel(logging.WARNING)
+logging.getLogger("anthropic").setLevel(logging.WARNING)
+
 
 dmp = diff_match_patch()
 dmp.Match_Distance = 1000000
@@ -124,11 +132,22 @@ def generate_system_prompt():
     return contextualized_system_prompt
 
 
+def lint_and_format_code(path=".") -> str:
+    command = f"ruff check --fix {path} && ruff format {path}"
+    result = subprocess.run(
+        command, shell=True, check=False, text=True, capture_output=True
+    )
+    return f"<lint_result>\n{result.stdout}\n{result.stderr}\n</lint_result>"
+
+
 def parse_diff(diff_text):
     lines = diff_text.split("\n")
     diffs = []
     current_hunk = []
     for line in lines:
+        # ignore the file headers
+        if line.startswith("---") or line.startswith("+++"):
+            continue
         if line.startswith("@@"):
             if current_hunk:
                 diffs.append(current_hunk)
@@ -149,41 +168,98 @@ def parse_diff(diff_text):
     return diffs
 
 
-def apply_diff(file_path, diff_text):
-    p = Path(file_path)
+def save_snapshot(
+    file_path: Path,
+    original_content: str,
+    applied_diff: str,
+    updated_content: str,
+    unified_diff: str,
+    lint_output: str,
+):
+    ctxl_dir = Path.cwd() / ".ctxl"
+    ctxl_dir.mkdir(exist_ok=True)
+
+    timestamp = datetime.now().isoformat(timespec="seconds").replace(":", "-")
+    snapshot_file = ctxl_dir / f"snapshot_{timestamp}.json"
+
+    snapshot_data = {
+        "file_path": str(file_path),
+        "original_content": original_content,
+        "applied_diff": applied_diff,
+        "updated_content": updated_content,
+        "post_diff": unified_diff,
+        "lint_output": lint_output,
+        "timestamp": timestamp,
+    }
+
+    with snapshot_file.open("w") as f:
+        json.dump(snapshot_data, f, indent=2)
+
+
+def apply_diff(file_path: Path, diff_text: str) -> str:
+    file_path = Path(file_path)  # Ensure file_path is a Path object
 
     # to handle the case where it's a diff for a new file
-    if not p.exists():
-        p.touch()
+    if not file_path.exists():
+        file_path.touch()
 
-    with p.open("r") as f:
-        text = f.read()
+    with file_path.open("r") as f:
+        original_content = f.read()
 
+    # Generate unified diff
     hunk_diffs = parse_diff(diff_text)
     hunk_patches = [dmp.patch_make(hunk) for hunk in hunk_diffs]
 
     failed_hunks = []
+    text = original_content
 
     for i, patch in enumerate(hunk_patches, 1):
         text, applied_successfully = dmp.patch_apply(patch, text)
 
         if not all(applied_successfully):
-            failed_hunks.append(i)
+            failed_hunks.append(str(i))
 
     if failed_hunks:
-        failed_hunks = "\n".join(map(str, failed_hunks))
-        return (
-            f"Failed to apply hunk(s): {failed_hunks}. The file has not been modified."
-        )
+        failed_hunks_str = ", ".join(failed_hunks)
+        return f"Failed to apply hunk(s): {failed_hunks_str}. The file has not been modified."
 
-    with p.open("w") as f:
+    with file_path.open("w") as f:
         f.write(text)
 
-    return text
+    lint_output = lint_and_format_code()
+
+    with file_path.open("r") as f:
+        updated_content = f.read()
+
+    # Generate unified diff
+    unified_diff_lines = list(
+        unified_diff(
+            original_content.splitlines(keepends=True),
+            updated_content.splitlines(keepends=True),
+            fromfile=str(file_path),
+            tofile=str(file_path),
+            lineterm="",
+        )
+    )
+    unified_diff_text = "".join(unified_diff_lines)
+
+    with file_path.open("w") as f:
+        f.write(text)
+
+    # Save snapshot after applying the diff
+    save_snapshot(
+        file_path,
+        original_content,
+        diff_text,
+        updated_content,
+        unified_diff_text,
+        lint_output,
+    )
+    return updated_content
 
 
 class ChatMode:
-    def __init__(self, bedrock: bool, version_control: VersionControl):
+    def __init__(self, bedrock: bool, version_control: VersionControl) -> None:
         if bedrock:
             self.client = AnthropicBedrock()
             self.model = "anthropic.claude-3-5-sonnet-20240620-v1:0"
@@ -191,13 +267,37 @@ class ChatMode:
             if not ANTHROPIC_API_KEY:
                 raise ValueError("ANTHROPIC_API_KEY not found in environment variables")
             self.client = Anthropic()
-            self.model = "claude-3-5-sonnet-20240620"
-        self.conversation_history = []
+            self.model: str = "claude-3-5-sonnet-20240620"
+        self.conversation_history: list[dict[str, str]] = []
         self.version_control = version_control
-        self.chat_dir = os.path.join(os.getcwd(), ".ctxl_chats")
-        self.loaded_chat_path = None
-        self.session_branch = None
+        self.chat_dir: str = os.path.join(os.getcwd(), ".ctxl_chats")
+        self.loaded_chat_path: str | None = None
         os.makedirs(self.chat_dir, exist_ok=True)
+
+    def list_chats(self):
+        chat_files = sorted(os.listdir(self.chat_dir), reverse=True)
+        if not chat_files:
+            print("No saved chats found.")
+        else:
+            print("Available chats:")
+            for i, chat in enumerate(chat_files, 1):
+                print(f"{i}. {chat}")
+
+    def switch_chat(self, chat_number):
+        chat_files = sorted(os.listdir(self.chat_dir), reverse=True)
+        if 1 <= chat_number <= len(chat_files):
+            selected_chat = chat_files[chat_number - 1]
+            filepath = os.path.join(self.chat_dir, selected_chat)
+            with open(filepath, "r") as f:
+                self.conversation_history = json.load(f)
+            self.loaded_chat_path = filepath
+            print(f"Switched to chat: {selected_chat}")
+        else:
+            print("Invalid chat number. Use 'list' to see available chats.")
+
+    def clear_history(self):
+        self.conversation_history = []
+        print("Conversation history cleared.")
 
     def execute_with_versioning(
         self, command: str, user_initiated: bool = False, is_diff: bool = False
@@ -206,57 +306,58 @@ class ChatMode:
             user_confirmation = (
                 input(f"Execute command: '{command}'? (y/n): ").strip().lower()
             )
-            if user_confirmation not in ["y", "yes"]:
+            if user_confirmation.strip() not in ["y", "yes", ""]:
                 return (
                     False,
                     """<result userskipped="true">\nUser skipped execution.\n</result>""",
                 )
-            target_pattern = r"<target>(.*?)</target>"
-            content_pattern = r"<content>(.*?)</content>"
-            purpose_pattern = r"<purpose>(.*?)</purpose>"
+        target_pattern = r"<target>(.*)</target>"
+        content_pattern = r"<content>(.*)</content>"
+        purpose_pattern = r"<purpose>(.*)</purpose>"
 
-            target_match = re.search(target_pattern, command, re.DOTALL)
-            target_path = target_match.group(1) if target_match else None
+        target_match = re.search(target_pattern, command, re.DOTALL)
+        target_path = target_match.group(1) if target_match else None
 
-            # Find the content
-            content_match = re.search(content_pattern, command, re.DOTALL)
-            content = content_match.group(1).strip() if content_match else None
+        # Find the content
+        content_match = re.search(content_pattern, command, re.DOTALL)
+        content = content_match.group(1).strip() if content_match else None
 
-            # Find the purpose
-            purpose_match = re.search(purpose_pattern, command, re.DOTALL)
-            purpose = purpose_match.group(1).strip() if purpose_match else None
+        if user_initiated:
+            content = command.removeprefix("!").strip()
 
-            if not is_diff:
-                result = subprocess.run(
-                    content,
-                    shell=True,
-                    check=False,
-                    text=True,
-                    capture_output=True,
-                    executable="/bin/bash",
-                )
+        # Find the purpose
+        purpose_match = re.search(purpose_pattern, command, re.DOTALL)
+        purpose = purpose_match.group(1).strip() if purpose_match else None
 
-                commit_message = purpose if purpose else f"Executed command: {command}"
+        if not is_diff:
+            result = subprocess.run(
+                content,
+                shell=True,
+                check=False,
+                text=True,
+                capture_output=True,
+                executable="/bin/bash",
+            )
 
-                # Create a new commit in the session branch
-                commit_hash = self.version_control.create_new_version(
-                    commit_message, branch=self.session_branch
-                )
+            commit_message = purpose if purpose else f"Executed command: {command}"
 
-                output = f"""<result userskipped="false" returncode="{result.returncode}" commit_hash="{commit_hash}">\n{result.stdout}\n{result.stderr}\n</result>"""
-            else:
-                commit_message = (
-                    purpose if purpose else f"Applied diff to {target_path}"
-                )
+            commit_hash = self.version_control.create_new_version(commit_message)
 
-                with capture_logs_and_output() as log_output:
-                    result = apply_diff(target_path, content)
+            lint_result = lint_and_format_code()
 
-                commit_hash = self.version_control.create_new_version(
-                    purpose, branch=self.session_branch
-                )
+            output = f"""<result userskipped="false" returncode="{result.returncode}" commit_hash="{commit_hash}">\n{result.stdout}\n{result.stderr}\n{lint_result}</result>"""
+        else:
+            commit_message = purpose if purpose else f"Applied diff to {target_path}"
 
-                output = f"""<result userskipped="false" commit_hash="{commit_hash}">\n<logs>\n{log_output.getvalue()}\n</logs>\n<edited_file>\n{result}\n</edited_file></result>"""
+            result = apply_diff(target_path, content)
+
+            commit_hash = self.version_control.create_new_version(
+                purpose,
+            )
+
+            lint_result = lint_and_format_code()
+
+            output = f"""<result userskipped="false" commit_hash="{commit_hash}"><updated_file>\n{result}\n</updated_file>\n{lint_result}\n</result>"""
 
         return (True, output)
 
@@ -274,8 +375,11 @@ class ChatMode:
                     model=self.model,
                     messages=self.conversation_history
                     + [{"role": "assistant", "content": current_response}],
-                    max_tokens=4096,
+                    max_tokens=8192,
                     stop_sequences=["<command>", "</command>", "<diff>", "</diff>"],
+                    extra_headers={
+                        "anthropic-beta": "max-tokens-3-5-sonnet-2024-07-15"
+                    },
                 ) as stream:
                     assistant_message = ""
                     for event in stream:
@@ -363,7 +467,7 @@ class ChatMode:
 
     def start(self):
         print(
-            "Entering interactive mode with Claude Sonnet. Type 'exit' to end the session or 'help' for available commands."
+            "Entering interactive mode with Claude Sonnet. Type 'exit' to end the session or '/help' for available commands."
         )
 
         resume_chat = (
@@ -378,6 +482,7 @@ class ChatMode:
         full_user_input = ""
         while True:
             try:
+                print("\n")
                 user_input = input("User: ").strip()
                 full_user_input += user_input + "\n"
 
@@ -393,16 +498,30 @@ class ChatMode:
                 if user_input.lower() == "exit":
                     print("Exiting interactive mode. Goodbye!")
                     break
-                elif user_input.lower() == "help":
+                elif user_input.lower() == "/help":
                     print("Available commands:")
                     print("  exit: Exit interactive mode")
-                    print("  help: Display this help message")
+                    print("  /help: Display this help message")
+                    print("  /list: List available saved chats")
+                    print("  /switch <number>: Switch to a specific chat")
+                    print("  /clear: Clear current conversation history")
                     print("  !<bash_command>: Execute a bash command directly")
                     print(
                         "Any other input will be sent to Claude Sonnet for processing."
                     )
                     continue
+                elif user_input.lower() == "/list":
+                    self.list_chats()
+                    continue
+                elif user_input.lower().startswith("/switch "):
+                    chat_number = int(user_input.split()[1])
+                    self.switch_chat(chat_number)
+                    continue
+                elif user_input.lower() == "/clear":
+                    self.clear_history()
+                    continue
 
+                print("Contextual: ", end="")
                 self.get_claude_response(full_user_input)
                 full_user_input = ""
                 # We don't need to print the response here as it's already printed in get_claude_response
@@ -422,7 +541,6 @@ class ChatMode:
         )
         with open(filepath, "w") as f:
             json.dump(self.conversation_history, f)
-        print(f"Chat saved to {filepath}")
 
     def load_latest_chat(self):
         chat_files = sorted(os.listdir(self.chat_dir), reverse=True)
@@ -436,11 +554,6 @@ class ChatMode:
             self.conversation_history = json.load(f)
         print(f"Loaded chat from {filepath}")
         return True
-
-    def start_session(self):
-        self.session_branch = f"llm-session-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-        self.version_control.create_branch(self.session_branch)
-        print(f"Started new session: {self.session_branch}")
 
 
 def main():

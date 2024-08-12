@@ -6,21 +6,17 @@ import xml.etree.ElementTree as ET
 from typing import Dict, List, Set
 
 import pathspec
-from git import GitCommandError
 
 from .chat_mode import ChatMode
 from .preset_manager import (
     get_presets,
     load_presets,
-    save_built_in_presets,
-    view_presets,
 )
-from .version_control import initialize_version_control
+from .version_control import VersionControl
 
 # Default exclude patterns
 DEFAULT_EXCLUDE = [".*"]  # This will exclude all dotfiles and folders
 
-# Set up logging
 logger = logging.getLogger(__name__)
 
 
@@ -195,142 +191,16 @@ def generate_xml(
     return ET.tostring(root_element, encoding="unicode", xml_declaration=True)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Dump folder contents and structure.")
-    parser.add_argument(
-        "--list-versions",
-        action="store_true",
-        help="List all versions in the project history",
-    )
-    parser.add_argument(
-        "--switch-version", type=str, help="Switch to a specific version (commit hash)"
-    )
-    parser.add_argument(
-        "--create-branch", type=str, help="Create a new branch from the current version"
-    )
+def chat_command(args):
+    version_control = VersionControl(os.getcwd())
+    chat = ChatMode(bedrock=args.bedrock, version_control=version_control)
+    chat.start()
 
-    parser.add_argument(
-        "folder_path", nargs="?", help="Path to the folder to be dumped"
-    )
-    parser.add_argument(
-        "-o", "--output", help="Path to the output file (default: stdout)", default="-"
-    )
-    parser.add_argument(
-        "--presets",
-        nargs="+",
-        choices=list(get_presets().keys()),
-        help="Preset project types to combine (default: auto-detect)",
-    )
-    parser.add_argument(
-        "--filter",
-        type=str,
-        help="Filter patterns to include or exclude files. Use '!' to exclude. Example: --filter '*.py !__pycache__ !*.pyc'",
-    )
-    parser.add_argument(
-        "--include-dotfiles",
-        action="store_true",
-        help="Include dotfiles and folders in the output",
-    )
-    parser.add_argument(
-        "--gitignore",
-        help="Path to the .gitignore file (default: .gitignore in the folder_path)",
-        default=None,
-    )
-    parser.add_argument(
-        "--task",
-        help="Task description to be included in the output",
-        default="Describe this project in detail. Pay special attention to the structure of the code, the design of the project, any frameworks/UI frameworks used, and the overall structure/workflow. If artifacts are available, then display workflow and sequence diagrams to help describe the project.",
-    )
-    parser.add_argument(
-        "--no-auto-detect",
-        action="store_true",
-        help="Disable auto-detection of project types",
-    )
-    parser.add_argument(
-        "--view-presets",
-        action="store_true",
-        help="View all available presets",
-    )
-    parser.add_argument(
-        "--save-presets",
-        action="store_true",
-        help="Save built-in presets to a YAML file",
-    )
-    parser.add_argument(
-        "--analyze-deps",
-        action="store_true",
-        help="Analyze project dependencies",
-        default=False,
-    )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Enable verbose logging",
-    )
-    parser.add_argument(
-        "--interactive",
-        action="store_true",
-        help="Enter interactive mode after generating XML",
-    )
 
-    parser.add_argument(
-        "--bedrock",
-        action="store_true",
-        help="Use AWS Bedrock for Claude API in interactive mode",
-    )
-
-    args = parser.parse_args()
-
-    setup_logging(args.verbose)
-
-    # Initialize version control
-    version_control = initialize_version_control(args.folder_path)
-
-    if args.view_presets:
-        print(view_presets())
-        return
-
-    if args.save_presets:
-        save_built_in_presets()
-        logger.info("Built-in presets have been saved to ctxl_presets.yaml")
-        return
-
-    if not args.folder_path:
-        logger.error(
-            "folder_path is required unless --view-presets or --save-presets is specified"
-        )
-        parser.error(
-            "folder_path is required unless --view-presets or --save-presets is specified"
-        )
-
-    # Handle version control CLI arguments
-    if args.list_versions:
-        history = version_control.get_version_history()
-        for version in history:
-            print(f"Commit: {version['id']}")
-            print(f"Message: {version['message']}")
-            print(f"Author: {version['author']}")
-            print(f"Timestamp: {version['timestamp']}")
-            print(f"Current: {'Yes' if version['is_current'] else 'No'}")
-            print("---")
-        return
-
-    if args.switch_version:
-        try:
-            version_control.switch_to_version(args.switch_version)
-            print(f"Switched to version: {args.switch_version}")
-        except GitCommandError as e:
-            print(f"Error switching version: {e}")
-        return
-
-    if args.create_branch:
-        try:
-            version_control.create_branch(args.create_branch)
-            print(f"Created and switched to new branch: {args.create_branch}")
-        except GitCommandError as e:
-            print(f"Error creating branch: {e}")
-        return
+def generate_command(args):
+    # Set the default gitignore path if not provided
+    if args.gitignore is None:
+        args.gitignore = os.path.join(args.folder_path, ".gitignore")
 
     # Load presets from the directory
     current_dir_presets = load_presets(
@@ -366,10 +236,6 @@ def main():
         ]
         logger.debug("Included dotfiles in the output")
 
-    # Set the default gitignore path if not provided
-    if args.gitignore is None:
-        args.gitignore = os.path.join(args.folder_path, ".gitignore")
-
     # Generate XML
     xml_output = generate_xml(
         args.folder_path,
@@ -394,13 +260,100 @@ def main():
         output.write(xml_output)
         logger.info("Output written to stdout")
 
-    # Enter interactive mode if specified
-    if args.interactive:
-        if args.bedrock:
-            chat_mode = ChatMode(bedrock=args.bedrock, version_control=version_control)
-        else:
-            chat_mode = ChatMode(bedrock=args.bedrock, version_control=version_control)
-        chat_mode.start()
+
+def add_common_arguments(parser):
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable verbose logging",
+    )
+    parser.add_argument(
+        "--bedrock",
+        action="store_true",
+        help="Use AWS Bedrock for Claude API in interactive mode",
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Contextual CLI tool")
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # Chat command
+    chat_parser = subparsers.add_parser("chat", help="Start an interactive chat session")
+    add_common_arguments(chat_parser)
+
+    # Generate command
+    generate_parser = subparsers.add_parser("generate", help="Generate project structure and content")
+    generate_parser.add_argument(
+        "folder_path", help="Path to the folder to be analyzed"
+    )
+    generate_parser.add_argument(
+        "-o", "--output", help="Path to the output file (default: stdout)", default="-"
+    )
+    generate_parser.add_argument(
+        "--presets",
+        nargs="+",
+        choices=list(get_presets().keys()),
+        help="Preset project types to combine (default: auto-detect)",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable verbose logging",
+    )
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Enter interactive mode after generating XML",
+    )
+    parser.add_argument(
+        "--bedrock",
+        action="store_true",
+        help="Use AWS Bedrock for Claude API in interactive mode",
+    )
+    generate_parser.add_argument(
+        "--filter",
+        type=str,
+        help="Filter patterns to include or exclude files. Use '!' to exclude. Example: --filter '*.py !__pycache__ !*.pyc'",
+    )
+    generate_parser.add_argument(
+        "--include-dotfiles",
+        action="store_true",
+        help="Include dotfiles and folders in the output",
+    )
+    generate_parser.add_argument(
+        "--gitignore",
+        help="Path to the .gitignore file (default: .gitignore in the folder_path)",
+        default=None,
+    )
+    generate_parser.add_argument(
+        "--task",
+        help="Task description to be included in the output",
+        default="Describe this project in detail. Pay special attention to the structure of the code, the design of the project, any frameworks/UI frameworks used, and the overall structure/workflow. If artifacts are available, then display workflow and sequence diagrams to help describe the project.",
+    )
+    generate_parser.add_argument(
+        "--no-auto-detect",
+        action="store_true",
+        help="Disable auto-detection of project types",
+    )
+    add_common_arguments(generate_parser)
+
+    args = parser.parse_args()
+
+    if args.command is None:
+        parser.print_help()
+        return
+
+    setup_logging(args.verbose)
+
+    if args.command == "chat":
+        chat_command(args)
+    elif args.command == "generate":
+        generate_command(args)
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":

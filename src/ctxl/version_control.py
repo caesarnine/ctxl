@@ -1,7 +1,8 @@
-import os
+from typing import Dict, List, Optional
+
 import git
 from git import GitCommandError
-from typing import List, Dict, Optional
+
 
 class VersionControl:
     def __init__(self, root_dir: str):
@@ -9,15 +10,13 @@ class VersionControl:
         self.repo = self._initialize_repo()
 
     def _initialize_repo(self) -> git.Repo:
-        if not os.path.exists(os.path.join(self.root_dir, ".git")):
+        try:
+            # Try to initialize a repo or find an existing one
+            repo = git.Repo(self.root_dir, search_parent_directories=True)
+        except git.InvalidGitRepositoryError:
+            # If no Git repo is found, create a new one in root_dir
             repo = git.Repo.init(self.root_dir)
-            # Create an initial commit if the repo is new
-            if not repo.head.is_valid():
-                open(os.path.join(self.root_dir, ".ctxl_initialized"), "a").close()
-                repo.index.add([".ctxl_initialized"])
-                repo.index.commit("Initial commit")
-        else:
-            repo = git.Repo(self.root_dir)
+            repo.index.commit("Initial commit")
         return repo
 
     def create_new_version(self, message: str, branch: Optional[str] = None) -> str:
@@ -68,19 +67,25 @@ class VersionControl:
         try:
             return self.repo.git.diff(f"{from_branch}...{to_branch}")
         except GitCommandError as e:
-            raise ValueError(f"Failed to get diff between {from_branch} and {to_branch}: {str(e)}")
+            raise ValueError(
+                f"Failed to get diff between {from_branch} and {to_branch}: {str(e)}"
+            )
 
     def get_changed_files(self, branch: str) -> List[str]:
         try:
             return self.repo.git.diff(f"main...{branch}", name_only=True).split()
         except GitCommandError as e:
-            raise ValueError(f"Failed to get changed files for branch {branch}: {str(e)}")
+            raise ValueError(
+                f"Failed to get changed files for branch {branch}: {str(e)}"
+            )
 
     def get_file_contents(self, file_path: str, branch: str) -> str:
         try:
             return self.repo.git.show(f"{branch}:{file_path}")
         except GitCommandError as e:
-            raise ValueError(f"Failed to get contents of {file_path} in branch {branch}: {str(e)}")
+            raise ValueError(
+                f"Failed to get contents of {file_path} in branch {branch}: {str(e)}"
+            )
 
     def merge_branch(self, source_branch: str, target_branch: str):
         current_branch = self.get_current_branch()
@@ -88,7 +93,9 @@ class VersionControl:
             self.repo.git.checkout(target_branch)
             self.repo.git.merge(source_branch)
         except GitCommandError as e:
-            raise ValueError(f"Failed to merge {source_branch} into {target_branch}: {str(e)}")
+            raise ValueError(
+                f"Failed to merge {source_branch} into {target_branch}: {str(e)}"
+            )
         finally:
             self.repo.git.checkout(current_branch)
 
@@ -104,6 +111,6 @@ class VersionControl:
         except GitCommandError as e:
             raise ValueError(f"Failed to delete branch {branch_name}: {str(e)}")
 
+
 def initialize_version_control(root_dir: str) -> VersionControl:
     return VersionControl(root_dir)
-

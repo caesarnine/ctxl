@@ -3,9 +3,11 @@
 [![PyPI version](https://badge.fury.io/py/ctxl.svg)](https://badge.fury.io/py/ctxl)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-ctxl is a CLI tool designed to transform project directories into a structured XML format suitable for language models and AI analysis. It intelligently extracts file contents and directory structures while respecting gitignore rules and custom filters. A key feature of ctxl is its ability to automatically detect project types (such as Python, JavaScript, or web projects) based on the files present in the directory. This auto-detection enables ctxl to make smart decisions about which files to include or exclude, ensuring that the output is relevant and concise. Users can also override this auto-detection with custom presets if needed.
+ctxl is a CLI tool that combines project analysis with an interactive chat that can edit files and run commands. 
 
-The tool creates a comprehensive project snapshot that can be easily parsed by LLMs, complete with a customizable task specification. This task specification acts as a prompt, priming the LLM to provide more targeted and relevant assistance with your project.
+ctxl intelligently extracts file contents and directory structures while respecting gitignore rules and custom filters, and automatically detecting project types (such as Python, or Javascript, etc) to make smart decisions about what to include and exclude.
+
+This dumps the project context in a format that can be easily parsed by LLMs, and can then be used to power an interactive chat session, allowing developers to get targeted, context-aware assistance with their projects.
 
 ctxl was developed through a bootstrapping process, where each version was used to generate context for an LLM in developing the next version.
 
@@ -29,7 +31,8 @@ ctxl was developed through a bootstrapping process, where each version was used 
 
 ## Why ctxl?
 
-ctxl streamlines the process of providing project context to LLMs. Instead of manually copying and pasting file contents or explaining your project structure, ctxl automatically generates a comprehensive, structured representation of your project. This allows LLMs to have a more complete understanding of your codebase, leading to more accurate and context-aware assistance.
+ctxl streamlines the process of providing project context to LLMs and interacting with them for project-specific assistance. The LLM can use this rich context to generate better code, and the interactive chat allows it to run commands and edit files while also getting feedback on errors/issues.
+
 
 ## Installation
 
@@ -41,52 +44,54 @@ pip install ctxl
 
 ## Quick Start
 
-After installation, you can quickly generate an XML representation of your project:
+After installation, you can quickly start using ctxl:
+
+1. Generate your project context and drop into chat:
+```bash
+ctxl generate . | ctxl chat
+```
+
+2. Generate only the context and dump it to stdout or file.
 
 ```bash
 ctxl /path/to/your/project > project_context.xml
 ```
 
-This command will create an XML file which you can then provide to an LLM for analysis or assistance. The XML output includes file contents, directory structure, and a default task description that guides the LLM in analyzing your project.
+This command will create an XML file which includes file contents, directory structure, and a default task description.
+
+3. Start an interactive chat session:
+
+```bash
+ctxl chat
+```
+
+Start an interactive session with no initial context. The chatbot can still run commands and edit files.
 
 ### Workflow
 
-This is how I've been using it - essentially as a iterative process.
+Here's a typical workflow for using ctxl:
 
-1. Paste this directly into your LLM's chat interface (or via API/CLI) and let it respond first. I've found the latest Claude models (Sonnet 3.5 as of writing this) to work best.
-2. The LLM will respond with a thorough breakdown and summary of the project first, which helps to prime the LLM with a better contextual understanding of the project, frameworks/libraries used, and overall user/data flow. 
-3. Chat with it as normal after. You can ask for things like:
-    >I'd like to update the frontend to show live progress when the backend is processing documents.
-
-4. The LLM will use the context of your entire project to suggest refactors/updates to all the relevant files involved to fulfill that ask.
-5. Update those files/sections, see if it works/if you like it, if not give feedback/error messages back to the model and keep iterating on.
-
-Future improvements to ctxl will likely automate #4 and #5 of this process.
-
-## How It Works
-
-ctxl operates in several steps:
-1. It scans the specified directory to detect the project type(s).
-2. Based on the detected type(s) or user-specified presets, it determines which files to include or exclude.
-3. It reads the contents of included files and constructs a directory structure.
-4. If enabled, it analyzes Python dependencies within the project and includes a dependency tree.
-5. All this information is then formatted into an XML structure, along with the specified task.
-6. The resulting XML is output to stdout or a specified file.
+1. Start the chat session with `ctxl generate /path/to/your/project | ctxl chat`
+2. ctxl will analyze your project and provide a summary, giving you a chance to confirm or adjust the context.
+3. Begin chatting with the AI. You can ask questions, request code changes, or seek advice. For example:
+   > "I'd like to update the frontend to show live progress when the backend is processing documents."
+4. The AI will respond, including commands or diffs to modify your project.
+5. You can review the suggestions, accept them or deny them, or continue chatting.
+6. Continue this iterative process as you work on your project.
 
 ## Usage
 
 ### Basic Usage
 
-To use ctxl, simply run the following command in your terminal:
-
+#### Generate
 ```bash
 ctxl /path/to/your/project
 ```
 
-By default, this will output the XML representation of your project to stdout. This allows for piping the output into other CLI tools, for example with [LLM](https://github.com/simonw/llm):
+By default, this will output the XML representation of your project to stdout. You can pipe that into another tool (ctxl chat for example.)
 
 ```bash
-ctxl /path/to/your/project | llm
+ctxl /path/to/your/project | ctxl chat
 ```
 
 To output to a file:
@@ -95,16 +100,31 @@ To output to a file:
 ctxl /path/to/your/project > context.xml
 ```
 
-or 
+To start a chat session with no inital context.
 
 ```bash
-ctxl /path/to/your/project -o context.xml
+ctxl chat
 ```
+
+### Chat Mode Usage
+
+In chat mode, you can interact with the AI assistant using natural language. Here are some example interactions:
+
+1. Ask for a project summary: "Can you give me an overview of this project?"
+2. Request code changes: "I need to add error handling to the main function in app.py"
+3. Seek advice: "What's the best way to implement user authentication in this Flask app?"
+4. Debug issues: "I'm getting a KeyError in this function. Can you help me fix it?"
+5. Propose new features: "How can I add a caching layer to improve performance?"
 
 ### Command-line Options
 
-ctxl offers several command-line options to customize its behavior:
+ctxl has two main commands: `generate` and `chat`. Each command has its own set of options.
 
+#### Generate Command
+
+The `generate` command analyzes a project and produces an XML representation of its structure and contents.
+
+Options:
 - `-o, --output`: Specify the output file path (default: stdout)
 - `--presets`: Choose preset project types to combine (default: auto-detect)
 - `--filter`: Filter patterns to include or exclude (!) files. Example: `'*.py !__pycache__'`
@@ -112,23 +132,46 @@ ctxl offers several command-line options to customize its behavior:
 - `--gitignore`: Specify a custom .gitignore file path
 - `--task`: Include a custom task description in the output
 - `--no-auto-detect`: Disable auto-detection of project types
-- `--view-presets`: Display all available presets (both built-in and custom)
-- `--save-presets`: Save the built-in presets to a YAML file for easy customization
 - `--analyze-deps`: Analyze project dependencies (default: True)
 - `-v, --verbose`: Enable verbose logging for more detailed output
 
-Example:
+#### Chat Command
 
-Use existing presets with additional filters to include `.log` and `.txt` and exclude a `temp` directory.
+The `chat` command starts an interactive chat session with an AI assistant.
+
+Options:
+- `-m, --message`: Initial message to send to the assistant
+- `--model`: Specify the AI model to use for chat (default: claude-3-5-sonnet-20240620)
+- `-v, --verbose`: Enable verbose logging for more detailed output
+
+#### Global Options
+
+These options are available for both commands:
+
+- `--view-presets`: Display all available presets (both built-in and custom)
+- `--save-presets`: Save the built-in presets to a YAML file for easy customization
+- `--bedrock`: Use AWS Bedrock for Claude API in interactive mode
+
+### Examples
+
+1. Generate context and start a chat session:
+
+Generate context with existing presets with additional filters to include `.log` and `.txt` and exclude a `temp` directory.
 
 ```bash
-ctxl /path/to/your/project --presets python javascript --output project_context.xml --task "Analyze this project for potential security vulnerabilities" --filter *.log *.txt !temp
+ctxl /path/to/your/project --presets python javascript --output project_context.xml --task "Analyze this project for potential security vulnerabilities" --filter *.log *.txt !temp | ctxl chat
 ```
 
-Don't use any presets and fully control what to include/exclude.
+2. Generate context without any presets and fully control what to include/exclude:
 
 ```bash
-ctxl /path/to/your/project --no-auto-detect --output project_context.xml --task "Analyze this project for potential security vulnerabilities" --filter *.py *.js *.md !node_modules
+ctxl /path/to/your/project --no-auto-detect --output project_context.xml --task "Analyze this project for potential security vulnerabilities" --filter *.py *.js *.md !node_modules | ctxl chat
+```
+
+3. Start a chat session with an initial message:
+
+```bash
+ctxl chat -m "How can I optimize the performance of my Python web application?"
 ```
 
 To view all available presets:
@@ -151,7 +194,7 @@ ctxl /path/to/your/project -v
 
 ### Presets
 
-ctxl includes presets for common project types:
+ctxl generate includes presets for common project types:
 
 - python: Includes .py, .pyi, .pyx, .ipynb files, ignores common Python-specific directories and files
 - javascript: Includes .js, .jsx, .mjs, .cjs files, ignores node_modules and other JS-specific files
@@ -170,18 +213,6 @@ ctxl includes presets for common project types:
 - misc: Includes common configuration and documentation file types
 
 The tool automatically detects project types, but you can also specify them manually using the `--presets` option.
-
-## Features
-
-- Auto-detects project types and respects .gitignore rules to determine what files to include/exclude
-- Fully customizable file inclusion/exclusion via `--filter` if you need more control
-- Generates AI-ready XML output with custom task descriptions
-- Simple CLI for easy integration into development workflows
-- Efficiently handles large, polyglot projects
-- Supports a wide range of programming languages and frameworks
-- Customizable presets with ability to view and save presets
-- Verbose logging option for detailed process information
-- Dependency analysis for Python projects (enabled by default)
 
 ## Output Example
 
@@ -254,18 +285,43 @@ The XML output provides a comprehensive view of the ctxl project, including file
 The ctxl project has the following structure:
 
 ```
-ctxl/
-├── src/
-│   └── ctxl/
-│       ├── __init__.py
-│       ├── ctxl.py
-│       ├── preset_manager.py
-│       └── dependency_analyzer.py
-├── README.md
-└── pyproject.toml
+src/ctxl/
+├── __init__.py
+├── ctxl.py
+├── cli.py
+├── preset_manager.py
+├── version_control.py
+├── system_prompt.txt
+├── chat/
+│   ├── __init__.py
+│   ├── ai_client.py
+│   ├── chat.py
+│   ├── executor.py
+│   └── session.py
+└── utils/
+    ├── __init__.py
+    ├── diff_utils.py
+    ├── file_utils.py
+    └── snapshot_utils.py
 ```
 
-The main functionality is implemented in `src/ctxl/ctxl.py`, with preset management handled in `src/ctxl/preset_manager.py` and dependency analysis in `src/ctxl/dependency_analyzer.py`.
+The main functionality is implemented across several files:
+
+- `ctxl.py`: Core functionality for project analysis and XML generation
+- `cli.py`: Command-line interface handling
+- `preset_manager.py`: Manages project type presets
+- `version_control.py`: Handles version control integration
+- `chat/`: Directory containing chat-related functionality
+  - `ai_client.py`: Handles communication with AI models
+  - `chat.py`: Implements the chat interface and logic
+  - `executor.py`: Executes commands and applies changes suggested by AI
+  - `session.py`: Manages chat sessions and history
+- `utils/`: Directory containing utility functions
+  - `diff_utils.py`: Utilities for handling diffs
+  - `file_utils.py`: File-related utility functions
+  - `snapshot_utils.py`: Functions for creating project snapshots
+
+The `system_prompt.txt` file contains the system prompt used to initialize the AI model for chat sessions.
 
 ## Troubleshooting
 
@@ -283,6 +339,9 @@ The main functionality is implemented in `src/ctxl/ctxl.py`, with preset managem
 
 - **Issue**: The dependency analysis is not working or is causing errors.
   **Solution**: You can disable dependency analysis with `--analyze-deps false` if it's causing issues.
+
+- **Issue**: The chat functionality is not working as expected.
+  **Solution**: Make sure you have the required dependencies installed and check the logs for any error messages. You can also try updating to the latest version of ctxl.
 
 ## Contributing
 

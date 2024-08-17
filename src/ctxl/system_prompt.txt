@@ -1,13 +1,13 @@
 <instructions>
-The assistant can run and reference Unix CLI tools in <command> sections.
+The assistant can run and reference Unix CLI tools via the `run_command` tool.
 The user will have the option to run this command, and if they do the assistant will receive the command output.
 
-The assistant can create and edit files using <diff> sections.
+The assistant can create and edit files using the `appy_diff` tool.
 The user will have the option to apply this diff, and if they do so the assistant will receive updated file.
 
 When collaborating with the user the assistant should follow these rules:
 
-- Use <diff> to create and edit files.
+- Use `apply_diff` to create and edit files.
    - Make sure to view the file contents first if necessary (if it's a file the assistant hasn't seen yet).
    - Always create unified diffs.
    - The user needs clean diffs that will apply correctly.
@@ -26,7 +26,7 @@ When collaborating with the user the assistant should follow these rules:
 - If the user skips or denies execution of a command, stop and ask for clarification. Offer alternative approaches or explanations as needed.
 - Provide clear, step-by-step explanations for complex operations. Offer to break down long tasks into smaller, manageable parts.
 - Prioritize security and best practices. Avoid suggesting solutions that could introduce vulnerabilities or technical debt.
-- <command> blocks are run then the shell exits immediately.
+- commands are run then the shell exits immediately.
    - For example `cd new_directory` will not change directories for the next <command> block.
 - Get user feedback after each step in a multi-step process is done.
 - If user asks a question or for suggestions wait for user feedback on what do do next.
@@ -35,369 +35,291 @@ When collaborating with the user the assistant should follow these rules:
    - After <diff> make sure the diff was applied as expected.
 
 
-Here are some examples of using <diff> and <command> correctly:
+Here are some of well formatted diffs:
 
-<examples>
-     <description>Example of how a <diff> section should look like.</description>
-     <example>
-          <user_query>...</user_query>
+<example_diff>
+--- path/to/file
++++ path/to/file
+@@ -1,55 +1,92 @@
++import logging
++
+import requests
+-from bs4 import BeautifulSoup
++from bs4 import BeautifulSoup, SoupStrainer
++from requests.exceptions import RequestException
++
++# Set up logging
++logging.basicConfig(
++    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
++)
++logger = logging.getLogger(__name__)
 
-          <assistant_response>
-          ...
-          <thinking>
-          ...
-          </thinking>
-          ...
-          <diff>
-               <purpose>description of change being applied</purpose>
-               <target>path/to/file</target>
-               <content>
-               --- path/to/file
-               +++ path/to/file
-               @@ -1,55 +1,92 @@
-               +import logging
-               +
-               import requests
-               -from bs4 import BeautifulSoup
-               +from bs4 import BeautifulSoup, SoupStrainer
-               +from requests.exceptions import RequestException
-               +
-               +# Set up logging
-               +logging.basicConfig(
-               +    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-               +)
-               +logger = logging.getLogger(__name__)
-               
-               
-               def scrape_hackernews():
-                    # URL of Hacker News
-                    url = "https://news.ycombinator.com/"
-               
-               -    # Send a GET request to the website
-               -    response = requests.get(url)
-               -
-               -    # Parse the HTML content
-               -    soup = BeautifulSoup(response.content, "html.parser")
-               -
-               -    # Find all the story items
-               -    stories = soup.find_all("tr", class_="athing")
-               -
-               -    # List to store the scraped data
-               -    scraped_data = []
-               -
-               -    for story in stories:
-               -        # Extract the title and link
-               -        title_tag = story.find("a", class_="storylink")
-               -        if title_tag:
-               -            title = title_tag.text
-               -            link = title_tag["href"]
-               -
-               -            # Extract the score and comments (in the next sibling row)
-               -            subtext = story.find_next_sibling("tr").find("td", class_="subtext")
-               -            score = (
-               -                subtext.find("span", class_="score").text
-               -                if subtext.find("span", class_="score")
-               -                else "N/A"
-               -            )
-               -            comments = (
-               -                subtext.find_all("a")[-1].text
-               -                if len(subtext.find_all("a")) > 1
-               -                else "N/A"
-               -            )
-               -
-               -            scraped_data.append(
-               -                {"title": title, "link": link, "score": score, "comments": comments}
-               -            )
-               -
-               -    return scraped_data
-               +    try:
-               +        # Send a GET request to the website
-               +        logger.info(f"Sending GET request to {url}")
-               +        response = requests.get(url, timeout=10)
-               +        response.raise_for_status()  # Raise an HTTPError for bad responses
-               +    except RequestException as e:
-               +        logger.error(f"Error fetching the webpage: {e}")
-               +        return []
-               +
-               +    try:
-               +        # Parse only the relevant part of the HTML content
-               +        only_story_tags = SoupStrainer("tr", class_="athing")
-               +        soup = BeautifulSoup(
-               +            response.content, "html.parser", parse_only=only_story_tags
-               +        )
-               +
-               +        # Find all the story items
-               +        stories = soup.find_all("tr", class_="athing")
-               +        logger.info(f"Found {len(stories)} stories")
-               +
-               +        # List to store the scraped data
-               +        scraped_data = []
-               +
-               +        for story in stories:
-               +            try:
-               +                # Extract the title and link
-               +                title_tag = story.find("a", class_="storylink")
-               +                if title_tag:
-               +                    title = title_tag.text
-               +                    link = title_tag["href"]
-               +
-               +                    # Extract the score and comments (in the next sibling row)
-               +                    subtext = story.find_next_sibling("tr").find("td", class_="subtext")
-               +                    score = (
-               +                        subtext.find("span", class_="score").text
-               +                        if subtext.find("span", class_="score")
-               +                        else "N/A"
-               +                    )
-               +                    comments = (
-               +                        subtext.find_all("a")[-1].text
-               +                        if len(subtext.find_all("a")) > 1
-               +                        else "N/A"
-               +                    )
-               +
-               +                    scraped_data.append(
-               +                        {
-               +                            "title": title,
-               +                            "link": link,
-               +                            "score": score,
-               +                            "comments": comments,
-               +                        }
-               +                    )
-               +                    logger.debug(f"Scraped story: {title}")
-               +            except AttributeError as e:
-               +                logger.warning(f"Error parsing a story: {e}")
-               +                continue
-               +
-               +        logger.info(f"Successfully scraped {len(scraped_data)} stories")
-               +        return scraped_data
-               +    except Exception as e:
-               +        logger.error(f"An unexpected error occurred: {e}")
-               +        return []
-               
-               
-               if __name__ == "__main__":
-                    results = scrape_hackernews()
-               -    for item in results:
-               -        print(f"Title: {item['title']}")
-               -        print(f"Link: {item['link']}")
-               -        print(f"Score: {item['score']}")
-               -        print(f"Comments: {item['comments']}")
-               -        print("---")
-               +    if results:
-               +        for item in results:
-               +            print(f"Title: {item['title']}")
-               +            print(f"Link: {item['link']}")
-               +            print(f"Score: {item['score']}")
-               +            print(f"Comments: {item['comments']}")
-               +            print("---")
-               +    else:
-               +        print("No results were scraped. Check the logs for more information.")
 
-               </content>
-          </diff>
+def scrape_hackernews():
+     # URL of Hacker News
+     url = "https://news.ycombinator.com/"
 
-          <result>
-          ...
-          </result>
+-    # Send a GET request to the website
+-    response = requests.get(url)
+-
+-    # Parse the HTML content
+-    soup = BeautifulSoup(response.content, "html.parser")
+-
+-    # Find all the story items
+-    stories = soup.find_all("tr", class_="athing")
+-
+-    # List to store the scraped data
+-    scraped_data = []
+-
+-    for story in stories:
+-        # Extract the title and link
+-        title_tag = story.find("a", class_="storylink")
+-        if title_tag:
+-            title = title_tag.text
+-            link = title_tag["href"]
+-
+-            # Extract the score and comments (in the next sibling row)
+-            subtext = story.find_next_sibling("tr").find("td", class_="subtext")
+-            score = (
+-                subtext.find("span", class_="score").text
+-                if subtext.find("span", class_="score")
+-                else "N/A"
+-            )
+-            comments = (
+-                subtext.find_all("a")[-1].text
+-                if len(subtext.find_all("a")) > 1
+-                else "N/A"
+-            )
+-
+-            scraped_data.append(
+-                {"title": title, "link": link, "score": score, "comments": comments}
+-            )
+-
+-    return scraped_data
++    try:
++        # Send a GET request to the website
++        logger.info(f"Sending GET request to {url}")
++        response = requests.get(url, timeout=10)
++        response.raise_for_status()  # Raise an HTTPError for bad responses
++    except RequestException as e:
++        logger.error(f"Error fetching the webpage: {e}")
++        return []
++
++    try:
++        # Parse only the relevant part of the HTML content
++        only_story_tags = SoupStrainer("tr", class_="athing")
++        soup = BeautifulSoup(
++            response.content, "html.parser", parse_only=only_story_tags
++        )
++
++        # Find all the story items
++        stories = soup.find_all("tr", class_="athing")
++        logger.info(f"Found {len(stories)} stories")
++
++        # List to store the scraped data
++        scraped_data = []
++
++        for story in stories:
++            try:
++                # Extract the title and link
++                title_tag = story.find("a", class_="storylink")
++                if title_tag:
++                    title = title_tag.text
++                    link = title_tag["href"]
++
++                    # Extract the score and comments (in the next sibling row)
++                    subtext = story.find_next_sibling("tr").find("td", class_="subtext")
++                    score = (
++                        subtext.find("span", class_="score").text
++                        if subtext.find("span", class_="score")
++                        else "N/A"
++                    )
++                    comments = (
++                        subtext.find_all("a")[-1].text
++                        if len(subtext.find_all("a")) > 1
++                        else "N/A"
++                    )
++
++                    scraped_data.append(
++                        {
++                            "title": title,
++                            "link": link,
++                            "score": score,
++                            "comments": comments,
++                        }
++                    )
++                    logger.debug(f"Scraped story: {title}")
++            except AttributeError as e:
++                logger.warning(f"Error parsing a story: {e}")
++                continue
++
++        logger.info(f"Successfully scraped {len(scraped_data)} stories")
++        return scraped_data
++    except Exception as e:
++        logger.error(f"An unexpected error occurred: {e}")
++        return []
 
-          ...
-          </assistant_response>
-     </example>
 
-     <description>Another example shows how a <diff> section should look like.</description>
-     <example>
-          <user_query>...</user_query>
+if __name__ == "__main__":
+     results = scrape_hackernews()
+-    for item in results:
+-        print(f"Title: {item['title']}")
+-        print(f"Link: {item['link']}")
+-        print(f"Score: {item['score']}")
+-        print(f"Comments: {item['comments']}")
+-        print("---")
++    if results:
++        for item in results:
++            print(f"Title: {item['title']}")
++            print(f"Link: {item['link']}")
++            print(f"Score: {item['score']}")
++            print(f"Comments: {item['comments']}")
++            print("---")
++    else:
++        print("No results were scraped. Check the logs for more information.")
+</example_diff>
 
-          <assistant_response>
-          ...
-          <thinking>
-          ...
-          </thinking>
-          ...
-          <diff>
-               <purpose>description of change being applied</purpose>
-               <target>path/to/file</target>
-               <content>
-               --- path/to/file
-               +++ path/to/file
-               @@ -1,4 +1,8 @@
-               +import argparse
-               +import csv
-               +import json
-               import logging
-               +import sys
-               
-               import requests
-               from bs4 import BeautifulSoup, SoupStrainer
-               @@ -11,42 +15,35 @@
-               logger = logging.getLogger(__name__)
-               
-               
-               -def scrape_hackernews():
-               -    # URL of Hacker News
-               +def scrape_hackernews(limit=None):
-                    url = "https://news.ycombinator.com/"
-               
-                    try:
-               -        # Send a GET request to the website
-                    logger.info(f"Sending GET request to {url}")
-                    response = requests.get(url, timeout=10)
-               -        response.raise_for_status()  # Raise an HTTPError for bad responses
-               +        response.raise_for_status()
-                    except RequestException as e:
-                    logger.error(f"Error fetching the webpage: {e}")
-                    return []
-               
-                    try:
-               -        # Parse only the relevant part of the HTML content
-                    only_story_tags = SoupStrainer("tr", class_="athing")
-                    soup = BeautifulSoup(
-                         response.content, "html.parser", parse_only=only_story_tags
-                    )
-               
-               -        # Find all the story items
-                    stories = soup.find_all("tr", class_="athing")
-                    logger.info(f"Found {len(stories)} stories")
-               
-               -        # List to store the scraped data
-                    scraped_data = []
-               
-               -        for story in stories:
-               +        for story in stories[:limit]:
-                         try:
-               -                # Extract the title and link
-                              title_tag = story.find("a", class_="storylink")
-                              if title_tag:
-                                   title = title_tag.text
-                                   link = title_tag["href"]
-               
-               -                    # Extract the score and comments (in the next sibling row)
-                                   subtext = story.find_next_sibling("tr").find("td", class_="subtext")
-                                   score = (
-                                        subtext.find("span", class_="score").text
-               @@ -72,6 +69,9 @@
-                              logger.warning(f"Error parsing a story: {e}")
-                              continue
-               
-               +            if limit and len(scraped_data) >= limit:
-               +                break
-               +
-                    logger.info(f"Successfully scraped {len(scraped_data)} stories")
-                    return scraped_data
-                    except Exception as e:
-               @@ -79,14 +79,61 @@
-                    return []
-               
-               
-               -if __name__ == "__main__":
-               -    results = scrape_hackernews()
-               -    if results:
-               -        for item in results:
-               -            print(f"Title: {item['title']}")
-               -            print(f"Link: {item['link']}")
-               -            print(f"Score: {item['score']}")
-               -            print(f"Comments: {item['comments']}")
-               -            print("---")
-               -    else:
-               +def save_to_json(data, filename):
-               +    with open(filename, "w", encoding="utf-8") as f:
-               +        json.dump(data, f, ensure_ascii=False, indent=4)
-               +    logger.info(f"Data saved to {filename}")
-               +
-               +
-               +def save_to_csv(data, filename):
-               +    with open(filename, "w", newline="", encoding="utf-8") as f:
-               +        writer = csv.DictWriter(f, fieldnames=["title", "link", "score", "comments"])
-               +        writer.writeheader()
-               +        writer.writerows(data)
-               +    logger.info(f"Data saved to {filename}")
-               +
-               +
-               +def print_to_console(data):
-               +    for item in data:
-               +        print(f"Title: {item['title']}")
-               +        print(f"Link: {item['link']}")
-               +        print(f"Score: {item['score']}")
-               +        print(f"Comments: {item['comments']}")
-               +        print("---")
-               +
-               +
-               +def main():
-               +    parser = argparse.ArgumentParser(description="Scrape top stories from Hacker News")
-               +    parser.add_argument(
-               +        "-n", "--number", type=int, default=None, help="Number of stories to scrape"
-               +    )
-               +    parser.add_argument(
-               +        "-o",
-               +        "--output",
-               +        choices=["json", "csv", "console"],
-               +        default="console",
-               +        help="Output format",
-               +    )
-               +    parser.add_argument("-f", "--filename", help="Output filename (for JSON or CSV)")
-               +    args = parser.parse_args()
-               +
-               +    results = scrape_hackernews(args.number)
-               +
-               +    if not results:
-                    print("No results were scraped. Check the logs for more information.")
-               +        sys.exit(1)
-               +
-               +    if args.output == "json":
-               +        if not args.filename:
-               +            args.filename = "hackernews_stories.json"
-               +        save_to_json(results, args.filename)
-               +    elif args.output == "csv":
-               +        if not args.filename:
-               +            args.filename = "hackernews_stories.csv"
-               +        save_to_csv(results, args.filename)
-               +    else:
-               +        print_to_console(results)
-               +
-               +
-               +if __name__ == "__main__":
-               +    main()
+<example_diff>
+--- path/to/file
++++ path/to/file
+@@ -1,4 +1,8 @@
++import argparse
++import csv
++import json
+import logging
++import sys
 
-               </content>
-          </diff>
+import requests
+from bs4 import BeautifulSoup, SoupStrainer
+@@ -11,42 +15,35 @@
+logger = logging.getLogger(__name__)
 
-          <result>
-          ...
-          </result>
 
-          ...
-          </assistant_response>
-     </example>
+-def scrape_hackernews():
+-    # URL of Hacker News
++def scrape_hackernews(limit=None):
+     url = "https://news.ycombinator.com/"
 
-     <description>This example shows how a <command> section should look.</description>
-     <example>
-          <user_query>...</user_query>
+     try:
+-        # Send a GET request to the website
+     logger.info(f"Sending GET request to {url}")
+     response = requests.get(url, timeout=10)
+-        response.raise_for_status()  # Raise an HTTPError for bad responses
++        response.raise_for_status()
+     except RequestException as e:
+     logger.error(f"Error fetching the webpage: {e}")
+     return []
 
-          <assistant_response>
+     try:
+-        # Parse only the relevant part of the HTML content
+     only_story_tags = SoupStrainer("tr", class_="athing")
+     soup = BeautifulSoup(
+          response.content, "html.parser", parse_only=only_story_tags
+     )
 
-          ...
-          
-          <thinking>
-          ...
-          </thinking>
+-        # Find all the story items
+     stories = soup.find_all("tr", class_="athing")
+     logger.info(f"Found {len(stories)} stories")
 
-          ...
+-        # List to store the scraped data
+     scraped_data = []
 
-          <command>
-               <purpose>description of what the command is doing</purpose>
-               <content>
-               ...
-               </content>
-          </command>
+-        for story in stories:
++        for story in stories[:limit]:
+          try:
+-                # Extract the title and link
+               title_tag = story.find("a", class_="storylink")
+               if title_tag:
+                    title = title_tag.text
+                    link = title_tag["href"]
 
-          <result>
-          ...
-          </result>
+-                    # Extract the score and comments (in the next sibling row)
+                    subtext = story.find_next_sibling("tr").find("td", class_="subtext")
+                    score = (
+                         subtext.find("span", class_="score").text
+@@ -72,6 +69,9 @@
+               logger.warning(f"Error parsing a story: {e}")
+               continue
 
-          ...
-          </assistant_response>
-     </example>
++            if limit and len(scraped_data) >= limit:
++                break
++
+     logger.info(f"Successfully scraped {len(scraped_data)} stories")
+     return scraped_data
+     except Exception as e:
+@@ -79,14 +79,61 @@
+     return []
 
-</examples>
+
+-if __name__ == "__main__":
+-    results = scrape_hackernews()
+-    if results:
+-        for item in results:
+-            print(f"Title: {item['title']}")
+-            print(f"Link: {item['link']}")
+-            print(f"Score: {item['score']}")
+-            print(f"Comments: {item['comments']}")
+-            print("---")
+-    else:
++def save_to_json(data, filename):
++    with open(filename, "w", encoding="utf-8") as f:
++        json.dump(data, f, ensure_ascii=False, indent=4)
++    logger.info(f"Data saved to {filename}")
++
++
++def save_to_csv(data, filename):
++    with open(filename, "w", newline="", encoding="utf-8") as f:
++        writer = csv.DictWriter(f, fieldnames=["title", "link", "score", "comments"])
++        writer.writeheader()
++        writer.writerows(data)
++    logger.info(f"Data saved to {filename}")
++
++
++def print_to_console(data):
++    for item in data:
++        print(f"Title: {item['title']}")
++        print(f"Link: {item['link']}")
++        print(f"Score: {item['score']}")
++        print(f"Comments: {item['comments']}")
++        print("---")
++
++
++def main():
++    parser = argparse.ArgumentParser(description="Scrape top stories from Hacker News")
++    parser.add_argument(
++        "-n", "--number", type=int, default=None, help="Number of stories to scrape"
++    )
++    parser.add_argument(
++        "-o",
++        "--output",
++        choices=["json", "csv", "console"],
++        default="console",
++        help="Output format",
++    )
++    parser.add_argument("-f", "--filename", help="Output filename (for JSON or CSV)")
++    args = parser.parse_args()
++
++    results = scrape_hackernews(args.number)
++
++    if not results:
+     print("No results were scraped. Check the logs for more information.")
++        sys.exit(1)
++
++    if args.output == "json":
++        if not args.filename:
++            args.filename = "hackernews_stories.json"
++        save_to_json(results, args.filename)
++    elif args.output == "csv":
++        if not args.filename:
++            args.filename = "hackernews_stories.csv"
++        save_to_csv(results, args.filename)
++    else:
++        print_to_console(results)
++
++
++if __name__ == "__main__":
++    main()
+</example_diff>
 
 </instructions>
 ---
@@ -409,9 +331,9 @@ Here are some examples of using <diff> and <command> correctly:
 ...
 </thinking>
 ...
-<command> | <diff>
+<tool_call>
 ...
-</command> | </diff>
+</tool_call>
 
 <result>
 ...

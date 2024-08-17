@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 from typing import Any, Dict, Generator, List
 
 import pkg_resources
@@ -431,26 +432,40 @@ class ChatMode:
 
         {self.config.system_prompt}"""
 
-    def start(self):
+    def start(self, initial_message=None) -> None:
         print(
             "Entering interactive mode with Claude Sonnet. Type 'exit' to end the session."
         )
 
-        while True:
-            try:
-                user_input = input("\nUser: ").strip()
+        try:
+            # Capture all piped input if there's any
+            if not sys.stdin.isatty():
+                initial_message = sys.stdin.read()
+                sys.stdin = open("/dev/tty")
 
-                if user_input.lower() == "exit":
-                    print("Exiting interactive mode. Goodbye!")
+            if initial_message:
+                print("\nProcessing initial input...")
+                self.get_claude_response(initial_message)
+
+            while True:
+                try:
+                    user_input = input("\nUser: ").strip()
+
+                    if user_input.lower() == "exit":
+                        print("Exiting interactive mode. Goodbye!")
+                        break
+
+                    print("Contextual: ", end="")
+                    self.get_claude_response(user_input)
+
+                except EOFError:
+                    print("\nEOF detected. Exiting interactive mode.")
                     break
 
-                print("Contextual: ", end="")
-                self.get_claude_response(user_input)
-            except KeyboardInterrupt:
-                print("\nKeyboard interrupt detected. Exiting interactive mode.")
-                break
-            except Exception as e:
-                print(f"An error occurred: {str(e)}")
+        except KeyboardInterrupt:
+            print("\nKeyboard interrupt detected. Exiting interactive mode.")
+        except Exception as e:
+            print(f"An error occurred: {str(e)}")
 
     def _generate_tools_description(self):
         return "\n".join(

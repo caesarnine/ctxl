@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import select
 import sys
 
 from .chat.chat import ChatMode, Config
@@ -24,12 +25,26 @@ def setup_logging(verbose: bool):
 
 
 def chat_command(args):
+    # Check if there's input from stdin (piped input)
+    if select.select(
+        [
+            sys.stdin,
+        ],
+        [],
+        [],
+        0.0,
+    )[0]:
+        initial_message = sys.stdin.read().strip()
+    else:
+        initial_message = args.message
+
     version_control = VersionControl(".")
     config = Config()
     chat = ChatMode(
         config=config, bedrock=args.bedrock, version_control=version_control
     )
-    chat.start()
+
+    chat.start(initial_message)
 
 
 def generate_command(args):
@@ -117,6 +132,9 @@ def main():
     # Chat command
     chat_parser = subparsers.add_parser(
         "chat", help="Start an interactive chat session"
+    )
+    chat_parser.add_argument(
+        "-m", "--message", help="Initial message to send to the assistant", default=None
     )
     add_common_arguments(chat_parser)
 

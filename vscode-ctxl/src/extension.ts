@@ -5,6 +5,9 @@ import { exec } from 'child_process';
 import util from 'util';
 import { open } from 'fs';
 const execPromise = util.promisify(exec);
+import * as path from 'path';
+import * as os from 'os';
+import * as crypto from 'crypto';
 
 const toolSchemas: Tool[] = [
     {
@@ -23,6 +26,28 @@ const toolSchemas: Tool[] = [
                 },
             },
             required: ['command', 'purpose'],
+        },
+    },
+    {
+        name: 'edit_file',
+        description: 'Propose edits to a file. Make sure to always use the entire content of the file after the proposed edits.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                filepath: {
+                    type: 'string',
+                    description: 'The path to the file to be edited',
+                },
+                purpose: {
+                    type: 'string',
+                    description: 'The purpose of the edit',
+                },
+                modified_file_content: {
+                    type: 'string',
+                    description: 'The entire content of the file after the proposed edits.',
+                },
+            },
+            required: ['filepath', 'purpose', 'modified_file_content'],
         },
     },
 ];
@@ -49,6 +74,7 @@ class EditorContentProvider {
         const allTabData = (await Promise.all(tabPromises)).flat();
     
         let xmlContent = '<editor_state>\n';
+        xmlContent += await this.getWorkspaceStructure();
         let currentGroupIndex = -1;
     
         allTabData.forEach(({ groupIndex, tabData }) => {
@@ -91,6 +117,116 @@ class EditorContentProvider {
             content: fileContent,
             isActive: isActive
         };
+    }
+
+    private async getWorkspaceStructure(maxDepth: number = 3, maxEntriesPerFolder: number = 10): Promise<string> {
+        let xmlContent = '<workspace_structure>\n';
+    
+        if (vscode.workspace.workspaceFolders) {
+            for (const folder of vscode.workspace.workspaceFolders) {
+                xmlContent += await this.getFolderStructure(folder.uri, 0, maxDepth, maxEntriesPerFolder);
+            }
+        }
+    
+        xmlContent += '</workspace_structure>';
+        return xmlContent;
+    }
+    
+    private async getFolderStructure(folderUri: vscode.Uri, currentDepth: number, maxDepth: number, maxEntries: number): Promise<string> {
+        if (currentDepth >= maxDepth) {
+            return `  <folder path="${folderUri.fsPath}" truncated="true" />\n`;
+        }
+    
+        let xmlContent = `  <folder path="${folderUri.fsPath}">\n`;
+        
+        try {
+            const entries = await vscode.workspace.fs.readDirectory(folderUri);
+            let count = 0;
+            for (const [name, type] of entries) {
+                if (count >= maxEntries) {
+                    xmlContent += `    <entry name="..." type="truncated" />\n`;
+                    break;
+                }
+                if (type === vscode.FileType.File) {
+                    xmlContent += `    <file name="${name}" />\n`;
+                } else if (type === vscode.FileType.Directory) {
+                    xmlContent += await this.getFolderStructure(vscode.Uri.joinPath(folderUri, name), currentDepth + 1, maxDepth, maxEntries);
+                }
+                count++;
+            }
+        } catch (error) {
+            console.error(`Error reading directory ${folderUri.fsPath}:`, error);
+            xmlContent += `    <error>Failed to read directory contents</error>\n`;
+        }
+    
+        xmlContent += `  </folder>\n`;
+        return xmlContent;
+    }
+}
+
+class FileDiffHandler {
+    private static instance: FileDiffHandler;
+
+    private constructor() {}
+
+    public static getInstance(): FileDiffHandler {
+        if (!FileDiffHandler.instance) {
+            FileDiffHandler.instance = new FileDiffHandler();
+        }
+        return FileDiffHandler.instance;
+    }
+
+    private async createTempFile(content: string): Promise<vscode.Uri> {
+        const tempDir = os.tmpdir();
+        const randomId = crypto.randomBytes(16).toString('hex');
+        const tempFilePath = path.join(tempDir, `vscode-ctxl-${randomId}`);
+        const uri = vscode.Uri.file(tempFilePath);
+        
+        const encoder = new TextEncoder();
+        await vscode.workspace.fs.writeFile(uri, encoder.encode(content));
+        
+        return uri;
+    }
+
+    private async deleteTempFile(uri: vscode.Uri): Promise<void> {
+        try {
+            await vscode.workspace.fs.delete(uri);
+        } catch (error) {
+            console.error(`Failed to delete temporary file ${uri.fsPath}:`, error);
+        }
+    }
+
+    public async showDiffAndGetApproval(filepath: string, originalContent: string, proposedContent: string, purpose: string): Promise<boolean> {
+        const originalUri = await this.createTempFile(originalContent);
+        const modifiedUri = await this.createTempFile(proposedContent);
+
+        try {
+            const title = `Proposed Edit: ${purpose}`;
+            const diffOptions: vscode.TextDocumentShowOptions = {
+                viewColumn: vscode.ViewColumn.Active,
+                preview: true
+            };
+
+            await vscode.commands.executeCommand('vscode.diff', originalUri, modifiedUri, title, diffOptions);
+
+            const result = await vscode.window.showInformationMessage(
+                'Do you want to apply these changes?',
+                { modal: true },
+                'Yes', 'No'
+            );
+
+            return result === 'Yes';
+        } finally {
+            // Ensure temp files are deleted even if an error occurs
+            await this.deleteTempFile(originalUri);
+            await this.deleteTempFile(modifiedUri);
+        }
+    }
+
+    public async applyChangesToFile(filepath: string, newContent: string): Promise<void> {
+        const uri = vscode.Uri.file(filepath);
+        const encoder = new TextEncoder();
+        await vscode.workspace.fs.writeFile(uri, encoder.encode(newContent));
     }
 }
 
@@ -146,7 +282,7 @@ class AnthropicChat {
 
         const editorContentsXml = await this.editorContentProvider.getAllEditorsContentAsXml();
         const contextMessage = `Current open files:\n${editorContentsXml}`;
-        const systemPrompt = contextMessage + '\nYou are a AI assistant with access to tools. You can also view the current open files as well as the active editor.';
+        const systemPrompt = contextMessage + '\nYou are a AI assistant with access to tools. You can also view the current open files as well as the active editor. Always cat files to write/edit them (just write the whole file).';
 
         console.log('System Prompt:', systemPrompt);
 
@@ -181,37 +317,41 @@ class AnthropicChat {
                 console.log('\nTool Use:', JSON.stringify(toolUse, null, 2));
                 assistantContent.push(toolUse);
 
+                let result: string;
                 if (toolUse.name === 'execute_command') {
-                    const input = toolUse.input as { command: string };
-                    const result = await this.executeCommandInTerminal(input.command);
-                    console.log(`\nCommand Result:\n${result}`);
-                
-                    this.webview?.postMessage({ 
-                        type: 'toolResult', 
-                        content: { toolName: input.command, result: 'Command executed' } 
-                    });
-
-                    this.messages.push({
-                        role: 'assistant',
-                        content: assistantContent,
-                    });
-                
-                    // The full result is still added to this.messages
-                    this.messages.push({
-                        role: 'user',
-                        content: [
-                            {
-                                type: 'tool_result',
-                                tool_use_id: toolUse.id,
-                                content: result,
-                            },
-                        ],
-                    });
-            
+                    result = await this.executeCommandInTerminal(toolUse);
+                } else if (toolUse.name === 'edit_file') {
+                    result = await this.handleEditFileTool(toolUse);
+                } else {
+                    result = 'Unknown tool';
                 }
+
+                console.log(`\nTool Result:\n${result}`);
+            
+                this.webview?.postMessage({ 
+                    type: 'toolResult', 
+                    content: { toolName: toolUse.name, result: result } 
+                });
+
+                this.messages.push({
+                    role: 'assistant',
+                    content: assistantContent,
+                });
+            
+                this.messages.push({
+                    role: 'user',
+                    content: [
+                        {
+                            type: 'tool_result',
+                            tool_use_id: toolUse.id,
+                            content: result,
+                        },
+                    ],
+                });
             }
-        // Get follow-up response
-        await this.streamResponse();
+
+            // Get follow-up response
+            await this.streamResponse();
         } else {
             this.messages.push({ role: 'assistant', content: assistantMessage });
         }
@@ -238,7 +378,8 @@ class AnthropicChat {
         });
     }
 
-    private async executeCommandInTerminal(command: string): Promise<string> {
+    private async executeCommandInTerminal(toolUse: ToolUseBlock): Promise<string> {
+        const input = toolUse.input as { command: string; purpose: string };
         return new Promise(async (resolve) => {
             this.terminal = vscode.window.terminals.find(t => t.name === this.terminalName);
             if (!this.terminal) {
@@ -249,7 +390,7 @@ class AnthropicChat {
             const shellIntegrationActivated = await this.waitForShellIntegration(this.terminal);
 
             if (shellIntegrationActivated && this.terminal.shellIntegration) {
-                const execution = this.terminal.shellIntegration.executeCommand(command);
+                const execution = this.terminal.shellIntegration.executeCommand(input.command);
                 let output = '';
                 for await (const data of execution.read()) {
                     output += data;
@@ -257,11 +398,43 @@ class AnthropicChat {
                 resolve(output);
             } else {
                 console.log('Shell integration not available, falling back to sendText');
-                this.terminal.sendText(command);
+                this.terminal.sendText(input.command);
                 // Note: We can't get the output in this case
                 resolve('Command sent, but output not available without shell integration');
             }
         });
+    }
+
+    private async handleEditFileTool(toolUse: ToolUseBlock): Promise<string> {
+        const input = toolUse.input as { filepath: string; purpose: string; changes: string };
+        const filePath = input.filepath;
+        const purpose = input.purpose;
+        const proposedContent = input.changes;
+    
+        try {
+            const uri = vscode.Uri.file(filePath);
+            const originalContentBuffer = await vscode.workspace.fs.readFile(uri);
+            const originalContent = new TextDecoder().decode(originalContentBuffer);
+    
+            const diffHandler = FileDiffHandler.getInstance();
+            const approved = await diffHandler.showDiffAndGetApproval(filePath, originalContent, proposedContent, purpose);
+    
+            if (approved) {
+                await diffHandler.applyChangesToFile(filePath, proposedContent);
+                return 'Changes applied successfully.';
+            } else {
+                return 'Changes were not applied.';
+            }
+        } catch (error: unknown) {
+            console.error('Error handling edit_file tool:', error);
+            if (error instanceof vscode.FileSystemError) {
+                return `File system error: ${error.message}`;
+            } else if (error instanceof Error) {
+                return `Error: ${error.message}`;
+            } else {
+                return `An unexpected error occurred: ${String(error)}`;
+            }
+        }
     }
 
     async setApiKey(apiKey: string) {

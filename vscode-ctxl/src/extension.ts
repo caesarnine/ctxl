@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { MessageParam, Tool, ToolUseBlock } from '@anthropic-ai/sdk/resources/messages';
 import { exec } from 'child_process';
 import util from 'util';
+import { open } from 'fs';
 const execPromise = util.promisify(exec);
 
 const toolSchemas: Tool[] = [
@@ -26,15 +27,85 @@ const toolSchemas: Tool[] = [
     },
 ];
 
+class EditorContentProvider {
+    async getAllEditorsContentAsXml(): Promise<string> {
+        const tabGroups = vscode.window.tabGroups;
+        const tabPromises: Promise<{ groupIndex: number; tabData: { path: string; content: string; isActive: boolean; } }[]>[] = [];
+    
+        tabGroups.all.forEach((group, groupIndex) => {
+            const groupPromise = Promise.all(
+                group.tabs.flatMap(async (tab): Promise<{ groupIndex: number; tabData: { path: string; content: string; isActive: boolean; } } | null> => {
+                    if (tab.input instanceof vscode.TabInputText && tab.input.uri.scheme === 'file') {
+                        const tabData = await this.getEditorData(tab.input, tab.isActive);
+                        return { groupIndex, tabData };
+                    }
+                    return null;
+                })
+            ).then(results => results.filter((result): result is { groupIndex: number; tabData: { path: string; content: string; isActive: boolean; } } => result !== null));
+    
+            tabPromises.push(groupPromise);
+        });
+    
+        const allTabData = (await Promise.all(tabPromises)).flat();
+    
+        let xmlContent = '<editor_state>\n';
+        let currentGroupIndex = -1;
+    
+        allTabData.forEach(({ groupIndex, tabData }) => {
+            if (groupIndex !== currentGroupIndex) {
+                if (currentGroupIndex !== -1) {
+                    xmlContent += '  </tab_group>\n';
+                }
+                xmlContent += `  <tab_group index="${groupIndex}">\n`;
+                currentGroupIndex = groupIndex;
+            }
+    
+            xmlContent += '    <tab>\n';
+            xmlContent += `      <path>${tabData.path}</path>\n`;
+            xmlContent += `      <content>${tabData.content}</content>\n`;
+            xmlContent += `      <is_active>${tabData.isActive}</is_active>\n`;
+            xmlContent += '    </tab>\n';
+        });
+    
+        if (currentGroupIndex !== -1) {
+            xmlContent += '  </tab_group>\n';
+        }
+    
+        xmlContent += '</editor_state>';
+        return xmlContent;
+    }
+
+    private async getEditorData(document: vscode.TabInputText, isActive: boolean): Promise<{path: string, content: string, isActive: boolean}> {
+        const filePath = document.uri.fsPath;
+        let fileContent: string;
+        try {
+            const contentUint8Array = await vscode.workspace.fs.readFile(document.uri);
+            fileContent = Buffer.from(contentUint8Array).toString('utf8');
+        } catch (error) {
+            console.error(`Error reading file ${filePath}:`, error);
+            fileContent = "Error reading file content";
+        }
+        
+        return {
+            path: filePath,
+            content: fileContent,
+            isActive: isActive
+        };
+    }
+}
+
 class AnthropicChat {
     private client: Anthropic | undefined;
     private webview: vscode.Webview | undefined;
     private messages: MessageParam[] = [];
     private terminal: vscode.Terminal | undefined;
     private readonly terminalName = 'Contextual';
+    private editorContentProvider: EditorContentProvider;
+
 
     constructor(private context: vscode.ExtensionContext) {
         this.initializeClient();
+        this.editorContentProvider = new EditorContentProvider();
     }
 
     async initializeClient() {
@@ -73,11 +144,17 @@ class AnthropicChat {
     private async streamResponse() {
         if (!this.client || !this.webview) return;
 
+        const editorContentsXml = await this.editorContentProvider.getAllEditorsContentAsXml();
+        const contextMessage = `Current open files:\n${editorContentsXml}`;
+        const systemPrompt = contextMessage + '\nYou are a AI assistant with access to tools. You can also view the current open files as well as the active editor.';
+
+        console.log('System Prompt:', systemPrompt);
+
         const stream = await this.client.messages.stream({
             messages: this.messages,
             model: 'claude-3-5-sonnet-20240620',
             max_tokens: 1024,
-            system: "You are an AI assistant capable of using tools to help with tasks.",
+            system: systemPrompt,
             tools: toolSchemas,
         });
 

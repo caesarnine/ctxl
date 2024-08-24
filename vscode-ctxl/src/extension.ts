@@ -39,16 +39,12 @@ const toolSchemas: Tool[] = [
                     type: 'string',
                     description: 'The path to the file to be edited',
                 },
-                purpose: {
-                    type: 'string',
-                    description: 'The purpose of the edit',
-                },
                 file_content: {
                     type: 'string',
-                    description: 'The new content for the file. Always include this.le',
+                    description: 'The new content for the file. Always include this if you are editing a file.',
                 },
             },
-            required: ['filepath', 'purpose', 'file_content'],
+            required: ['filepath', 'file_content'],
         },
     },
     {
@@ -250,7 +246,7 @@ class FileDiffHandler {
         }
     }
 
-    public async showDiffAndGetApproval(filepath: string, originalContent: string, proposedContent: string, purpose: string): Promise<boolean> {
+    public async showDiffAndGetApproval(filepath: string, originalContent: string, proposedContent: string): Promise<boolean> {
         console.log(`Showing diff for ${filepath}`);
         console.log(`Original content:\n${originalContent}`);
         console.log(`Proposed content:\n${proposedContent}`);
@@ -259,7 +255,7 @@ class FileDiffHandler {
         const modifiedUri = await this.createTempFile(proposedContent);
 
         try {
-            const title = `Proposed Edit: ${purpose}`;
+            const title = `Proposed Edit`;
             const diffOptions: vscode.TextDocumentShowOptions = {
                 viewColumn: vscode.ViewColumn.Active,
                 preview: false
@@ -298,11 +294,32 @@ class FileDiffHandler {
     }
 
     public async applyChangesToFile(filepath: string, newContent: string): Promise<void> {
+        console.log(`Applying changes to file: ${filepath}`);
         const uri = vscode.Uri.file(filepath);
         const encoder = new TextEncoder();
-        await vscode.workspace.fs.writeFile(uri, encoder.encode(newContent));
+        try {
+            await vscode.workspace.fs.writeFile(uri, encoder.encode(newContent));
+            console.log(`Changes applied successfully to ${filepath}`);
+            
+            // Force a refresh of the file in the editor
+            const document = await vscode.workspace.openTextDocument(uri);
+            await vscode.window.showTextDocument(document, { preview: false });
+            
+            // Verify the file content after writing
+            const updatedContent = await vscode.workspace.fs.readFile(uri);
+            const updatedContentString = new TextDecoder().decode(updatedContent);
+            console.log(`Updated file content:\n${updatedContentString}`);
+            
+            if (updatedContentString !== newContent) {
+                console.error('File content does not match the expected content after writing');
+            }
+        } catch (error) {
+            console.error(`Error applying changes to ${filepath}:`, error);
+            throw error;
+        }
     }
 }
+
 
 class AnthropicChat {
     private client: Anthropic | undefined;
@@ -356,9 +373,7 @@ class AnthropicChat {
 
         const editorContentsXml = await this.editorContentProvider.getAllEditorsContentAsXml();
         const contextMessage = `Current open files:\n${editorContentsXml}`;
-        const systemPrompt = contextMessage + '\nYou are a AI assistant with access to the following tools: ' + JSON.stringify(toolSchemas, null, 2) + '. Always include all parameters for all the tools. You can also view the current open files as well as the active editor. Always think step by step in a <thinking>...</thinking> block before doing anything.';
-
-        console.log('System Prompt:', systemPrompt);
+        const systemPrompt = contextMessage + '\nYou are a AI assistant with access to the following tools: ' + JSON.stringify(toolSchemas, null, 2) + '. Always include the new file content when editing files. You can also view the current open files as well as the active editor. Always think step by step in a <thinking>...</thinking> block before doing anything.';
 
         const stream = await this.client.messages.stream({
             messages: this.messages,
@@ -501,6 +516,7 @@ class AnthropicChat {
     }
 
     private async handleEditFileTool(toolUse: ToolUseBlock): Promise<string> {
+        console.log('==== STARTING EDIT FILE TOOL HANDLING ====');
         console.log('Received tool use:', JSON.stringify(toolUse, null, 2));
 
         const input = toolUse.input as { filepath: string; purpose: string; file_content: string };
@@ -527,12 +543,15 @@ class AnthropicChat {
             console.log(`Original content:\n${originalContent}`);
 
             const diffHandler = FileDiffHandler.getInstance();
-            const approved = await diffHandler.showDiffAndGetApproval(filePath, originalContent, proposedContent, purpose);
+            const approved = await diffHandler.showDiffAndGetApproval(filePath, originalContent, proposedContent);
 
             if (approved) {
+                console.log('Changes approved, applying to file...');
                 await diffHandler.applyChangesToFile(filePath, proposedContent);
+                console.log('Changes applied successfully.');
                 return 'Changes applied successfully.';
             } else {
+                console.log('Changes were not approved.');
                 return 'Changes were not applied.';
             }
         } catch (error: unknown) {

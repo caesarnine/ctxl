@@ -69,6 +69,7 @@
     "typescript": "^5.4.5"
   },
   "dependencies": {
+    "@anthropic-ai/bedrock-sdk": "^0.10.2",
     "@anthropic-ai/sdk": "^0.26.1",
     "@vscode/dts": "^0.4.1"
   },
@@ -76,10 +77,10 @@
     "terminalExecuteCommandEvent"
   ],
   "files": [
-      "out",
-      "dist",
-      "src",
-      "package.json",
-      "README.md"
+    "out",
+    "dist",
+    "src",
+    "package.json",
+    "README.md"
   ]
 }

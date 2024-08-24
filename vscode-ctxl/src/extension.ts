@@ -3,11 +3,12 @@ import Anthropic from '@anthropic-ai/sdk';
 import { MessageParam, Tool, ToolUseBlock } from '@anthropic-ai/sdk/resources/messages';
 import { exec } from 'child_process';
 import util from 'util';
-import { open } from 'fs';
 const execPromise = util.promisify(exec);
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
+import * as fs from 'fs';
+import ignore from 'ignore';
 
 const toolSchemas: Tool[] = [
     {
@@ -30,7 +31,7 @@ const toolSchemas: Tool[] = [
     },
     {
         name: 'edit_file',
-        description: 'Propose edits to a file. Make sure to always use the entire content of the file after the proposed edits.',
+        description: 'Edit a file. The user can review the changes before applying them.',
         input_schema: {
             type: 'object',
             properties: {
@@ -42,17 +43,64 @@ const toolSchemas: Tool[] = [
                     type: 'string',
                     description: 'The purpose of the edit',
                 },
-                modified_file_content: {
+                file_content: {
                     type: 'string',
-                    description: 'The entire content of the file after the proposed edits.',
+                    description: 'The new content for the file. Always include this.le',
                 },
             },
-            required: ['filepath', 'purpose', 'modified_file_content'],
+            required: ['filepath', 'purpose', 'file_content'],
+        },
+    },
+    {
+        name: 'open_file',
+        description: 'Open a file in the VS Code editor',
+        input_schema: {
+            type: 'object',
+            properties: {
+                filepath: {
+                    type: 'string',
+                    description: 'The path to the file to be opened',
+                },
+                purpose: {
+                    type: 'string',
+                    description: 'The purpose of opening this file',
+                },
+            },
+            required: ['filepath', 'purpose'],
         },
     },
 ];
 
 class EditorContentProvider {
+    private ignoreRules: ReturnType<typeof ignore>;
+
+    constructor() {
+        this.ignoreRules = ignore();
+        this.initIgnoreRules();
+    }
+
+    private async initIgnoreRules() {
+        // Add rules from VS Code settings
+        const excludeSettings = vscode.workspace.getConfiguration('files').get('exclude') || {};
+        const searchExcludeSettings = vscode.workspace.getConfiguration('search').get('exclude') || {};
+        Object.keys({...excludeSettings, ...searchExcludeSettings}).forEach(pattern => {
+            this.ignoreRules.add(pattern);
+        });
+
+        // Add rules from .gitignore if it exists
+        if (vscode.workspace.workspaceFolders) {
+            const gitignorePath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, '.gitignore');
+            if (fs.existsSync(gitignorePath)) {
+                const gitignoreContent = await fs.promises.readFile(gitignorePath, 'utf8');
+                this.ignoreRules.add(gitignoreContent);
+            }
+        }
+    }
+
+    private isIgnored(relativePath: string): boolean {
+        return this.ignoreRules.ignores(relativePath);
+    }
+
     async getAllEditorsContentAsXml(): Promise<string> {
         const tabGroups = vscode.window.tabGroups;
         const tabPromises: Promise<{ groupIndex: number; tabData: { path: string; content: string; isActive: boolean; } }[]>[] = [];
@@ -119,12 +167,12 @@ class EditorContentProvider {
         };
     }
 
-    private async getWorkspaceStructure(maxDepth: number = 3, maxEntriesPerFolder: number = 10): Promise<string> {
+    private async getWorkspaceStructure(maxDepth: number = 3): Promise<string> {
         let xmlContent = '<workspace_structure>\n';
     
         if (vscode.workspace.workspaceFolders) {
             for (const folder of vscode.workspace.workspaceFolders) {
-                xmlContent += await this.getFolderStructure(folder.uri, 0, maxDepth, maxEntriesPerFolder);
+                xmlContent += await this.getFolderStructure(folder.uri, 0, maxDepth);
             }
         }
     
@@ -132,7 +180,7 @@ class EditorContentProvider {
         return xmlContent;
     }
     
-    private async getFolderStructure(folderUri: vscode.Uri, currentDepth: number, maxDepth: number, maxEntries: number): Promise<string> {
+    private async getFolderStructure(folderUri: vscode.Uri, currentDepth: number, maxDepth: number): Promise<string> {
         if (currentDepth >= maxDepth) {
             return `  <folder path="${folderUri.fsPath}" truncated="true" />\n`;
         }
@@ -141,18 +189,21 @@ class EditorContentProvider {
         
         try {
             const entries = await vscode.workspace.fs.readDirectory(folderUri);
-            let count = 0;
             for (const [name, type] of entries) {
-                if (count >= maxEntries) {
-                    xmlContent += `    <entry name="..." type="truncated" />\n`;
-                    break;
+                // Skip dotfiles and dotfolders
+                if (name.startsWith('.')) {
+                    continue;
                 }
+
+                if (name.startsWith('node_modules')) {
+                    continue;
+                }
+    
                 if (type === vscode.FileType.File) {
                     xmlContent += `    <file name="${name}" />\n`;
                 } else if (type === vscode.FileType.Directory) {
-                    xmlContent += await this.getFolderStructure(vscode.Uri.joinPath(folderUri, name), currentDepth + 1, maxDepth, maxEntries);
+                    xmlContent += await this.getFolderStructure(vscode.Uri.joinPath(folderUri, name), currentDepth + 1, maxDepth);
                 }
-                count++;
             }
         } catch (error) {
             console.error(`Error reading directory ${folderUri.fsPath}:`, error);
@@ -166,6 +217,7 @@ class EditorContentProvider {
 
 class FileDiffHandler {
     private static instance: FileDiffHandler;
+    private reviewChangesCommand: vscode.Disposable | undefined;
 
     private constructor() {}
 
@@ -185,6 +237,8 @@ class FileDiffHandler {
         const encoder = new TextEncoder();
         await vscode.workspace.fs.writeFile(uri, encoder.encode(content));
         
+        console.log(`Temp file created at ${uri.fsPath} with content:\n${content}`);
+        
         return uri;
     }
 
@@ -197,6 +251,10 @@ class FileDiffHandler {
     }
 
     public async showDiffAndGetApproval(filepath: string, originalContent: string, proposedContent: string, purpose: string): Promise<boolean> {
+        console.log(`Showing diff for ${filepath}`);
+        console.log(`Original content:\n${originalContent}`);
+        console.log(`Proposed content:\n${proposedContent}`);
+
         const originalUri = await this.createTempFile(originalContent);
         const modifiedUri = await this.createTempFile(proposedContent);
 
@@ -204,18 +262,34 @@ class FileDiffHandler {
             const title = `Proposed Edit: ${purpose}`;
             const diffOptions: vscode.TextDocumentShowOptions = {
                 viewColumn: vscode.ViewColumn.Active,
-                preview: true
+                preview: false
             };
 
             await vscode.commands.executeCommand('vscode.diff', originalUri, modifiedUri, title, diffOptions);
 
-            const result = await vscode.window.showInformationMessage(
-                'Do you want to apply these changes?',
-                { modal: true },
-                'Yes', 'No'
-            );
+            // Create a status bar item for user actions
+            const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+            statusBarItem.text = "$(diff-added) Review Changes";
+            statusBarItem.tooltip = "Click to accept or reject changes";
+            statusBarItem.command = 'extension.reviewChanges';
+            statusBarItem.show();
 
-            return result === 'Yes';
+            return new Promise<boolean>((resolve) => {
+                if (!this.reviewChangesCommand) {
+                    this.reviewChangesCommand = vscode.commands.registerCommand('extension.reviewChanges', async () => {
+                        const result = await vscode.window.showQuickPick(['Accept Changes', 'Reject Changes'], {
+                            placeHolder: 'Do you want to apply these changes?'
+                        });
+
+                        statusBarItem.dispose();
+
+                        // Close the diff view
+                        await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+
+                        resolve(result === 'Accept Changes');
+                    });
+                }
+            });
         } finally {
             // Ensure temp files are deleted even if an error occurs
             await this.deleteTempFile(originalUri);
@@ -282,7 +356,7 @@ class AnthropicChat {
 
         const editorContentsXml = await this.editorContentProvider.getAllEditorsContentAsXml();
         const contextMessage = `Current open files:\n${editorContentsXml}`;
-        const systemPrompt = contextMessage + '\nYou are a AI assistant with access to tools. You can also view the current open files as well as the active editor. Always cat files to write/edit them (just write the whole file).';
+        const systemPrompt = contextMessage + '\nYou are a AI assistant with access to the following tools: ' + JSON.stringify(toolSchemas, null, 2) + '. Always include all parameters for all the tools. You can also view the current open files as well as the active editor. Always think step by step in a <thinking>...</thinking> block before doing anything.';
 
         console.log('System Prompt:', systemPrompt);
 
@@ -322,6 +396,8 @@ class AnthropicChat {
                     result = await this.executeCommandInTerminal(toolUse);
                 } else if (toolUse.name === 'edit_file') {
                     result = await this.handleEditFileTool(toolUse);
+                } else if (toolUse.name === 'open_file') {
+                    result = await this.handleOpenFileTool(toolUse);
                 } else {
                     result = 'Unknown tool';
                 }
@@ -405,20 +481,54 @@ class AnthropicChat {
         });
     }
 
+    private async handleOpenFileTool(toolUse: ToolUseBlock): Promise<string> {
+        const input = toolUse.input as { filepath: string; purpose: string };
+        const filePath = input.filepath;
+
+        try {
+            const uri = vscode.Uri.file(filePath);
+            const document = await vscode.workspace.openTextDocument(uri);
+            await vscode.window.showTextDocument(document);
+            return `File ${filePath} opened successfully.`;
+        } catch (error) {
+            console.error('Error opening file:', error);
+            if (error instanceof Error) {
+                return `Error opening file: ${error.message}`;
+            } else {
+                return `An unexpected error occurred while opening the file: ${String(error)}`;
+            }
+        }
+    }
+
     private async handleEditFileTool(toolUse: ToolUseBlock): Promise<string> {
-        const input = toolUse.input as { filepath: string; purpose: string; changes: string };
+        console.log('Received tool use:', JSON.stringify(toolUse, null, 2));
+
+        const input = toolUse.input as { filepath: string; purpose: string; file_content: string };
+        console.log('Edit file tool input:', JSON.stringify(input, null, 2));
+
         const filePath = input.filepath;
         const purpose = input.purpose;
-        const proposedContent = input.changes;
-    
+        const proposedContent = input.file_content;
+
+        console.log(`File path: ${filePath}`);
+        console.log(`Purpose: ${purpose}`);
+        console.log(`Proposed content: ${proposedContent}`);
+
+        if (!proposedContent) {
+            console.error('Proposed content is undefined or empty');
+            return 'Error: Proposed content is missing';
+        }
+
         try {
             const uri = vscode.Uri.file(filePath);
             const originalContentBuffer = await vscode.workspace.fs.readFile(uri);
             const originalContent = new TextDecoder().decode(originalContentBuffer);
-    
+
+            console.log(`Original content:\n${originalContent}`);
+
             const diffHandler = FileDiffHandler.getInstance();
             const approved = await diffHandler.showDiffAndGetApproval(filePath, originalContent, proposedContent, purpose);
-    
+
             if (approved) {
                 await diffHandler.applyChangesToFile(filePath, proposedContent);
                 return 'Changes applied successfully.';

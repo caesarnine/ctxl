@@ -1,71 +1,73 @@
 # vscode-ctxl README
 
-This is the README for your extension "vscode-ctxl". After writing up a brief description, we recommend including the following sections.
+Welcome to vscode-ctxl, a Visual Studio Code extension that provides contextual AI assistance powered by Anthropic's Claude model. This tool enhances your coding experience with intelligent, context-aware support integrated directly into your development workflow.
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
-
-For example if there is an image subfolder under your extension project workspace:
-
-\!\[feature X\]\(images/feature-x.png\)
-
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+- **Contextual AI Chat**: Interact with an AI assistant that has access to your current workspace context, including open files and editor contents.
+- **Intelligent Code Assistance**: Get help with coding tasks, ask questions, and receive context-aware responses.
+- **File Editing**: The AI can propose edits to your files, which you can review and approve through a diff interface.
+- **Command Execution**: Execute shell commands directly from the chat interface and view the results.
+- **Markdown Rendering**: Chat messages support Markdown formatting for better readability.
+- **Workspace Structure Awareness**: The AI has access to your workspace structure, allowing for more contextual assistance.
 
 ## Requirements
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+- Visual Studio Code version 1.60.0 or higher.
+- An active internet connection.
+- An Anthropic API key (Claude model access required).
 
 ## Extension Settings
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
 This extension contributes the following settings:
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+* `anthropic-api-key`: Set your Anthropic API key for authentication. This is stored securely using VS Code's secret storage.
+
+## Usage
+
+1. Open the Contextual Chat sidebar by clicking on the icon in the Activity Bar or by running the "Open Contextual Chat Interface" command from the Command Palette.
+2. Set your Anthropic API key when prompted in the chat interface or through the settings button in the chat view.
+3. Start chatting with the AI assistant. You can ask questions, request code help, or instruct the AI to perform tasks.
+4. For file edits, the AI will show you a diff of the proposed changes, which you can approve or reject.
+5. To execute shell commands, simply ask the AI to do so in your chat message.
+
+## Commands
+
+- `vscode-ctxl.openChatInterface`: Open the Contextual Chat sidebar.
+- `vscode-ctxl.setAnthropicApiKey`: Set or update your Anthropic API key.
 
 ## Known Issues
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+- The extension requires an active internet connection to communicate with the Anthropic API.
+- Large files or extensive workspace structures may impact performance.
+- Shell integration for command execution may not be available in all environments.
+
+## Privacy and Data Usage
+
+This extension sends your current workspace context, including file contents and structure, to Anthropic's API for processing. Please ensure you comply with your organization's data privacy policies when using this extension.
 
 ## Release Notes
 
-Users appreciate release notes as you update your extension.
-
 ### 1.0.0
 
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
+Initial release of vscode-ctxl:
+- Integrated Contextual AI Chat interface
+- File editing capabilities with diff review
+- Command execution feature
+- Markdown rendering in chat
+- Workspace structure awareness
+- Secure API key storage
 
 ---
 
 ## Following extension guidelines
 
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
+This extension follows the [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines) provided by Visual Studio Code.
 
 ## For more information
 
 * [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
 * [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
+* [Anthropic Claude API Documentation](https://docs.anthropic.com/)
 
-**Enjoy!**
+**Enjoy using vscode-ctxl!**

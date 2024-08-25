@@ -30,24 +30,6 @@ const toolSchemas: Tool[] = [
         },
     },
     {
-        name: 'edit_file',
-        description: 'Edit a file. The user can review the changes before applying them.',
-        input_schema: {
-            type: 'object',
-            properties: {
-                filepath: {
-                    type: 'string',
-                    description: 'The path to the file to be edited',
-                },
-                file_content: {
-                    type: 'string',
-                    description: 'The new content for the file. Always include this if you are editing a file.',
-                },
-            },
-            required: ['filepath', 'file_content'],
-        },
-    },
-    {
         name: 'open_file',
         description: 'Open a file in the VS Code editor',
         input_schema: {
@@ -211,116 +193,6 @@ class EditorContentProvider {
     }
 }
 
-class FileDiffHandler {
-    private static instance: FileDiffHandler;
-    private reviewChangesCommand: vscode.Disposable | undefined;
-
-    private constructor() {}
-
-    public static getInstance(): FileDiffHandler {
-        if (!FileDiffHandler.instance) {
-            FileDiffHandler.instance = new FileDiffHandler();
-        }
-        return FileDiffHandler.instance;
-    }
-
-    private async createTempFile(content: string): Promise<vscode.Uri> {
-        const tempDir = os.tmpdir();
-        const randomId = crypto.randomBytes(16).toString('hex');
-        const tempFilePath = path.join(tempDir, `vscode-ctxl-${randomId}`);
-        const uri = vscode.Uri.file(tempFilePath);
-        
-        const encoder = new TextEncoder();
-        await vscode.workspace.fs.writeFile(uri, encoder.encode(content));
-        
-        console.log(`Temp file created at ${uri.fsPath} with content:\n${content}`);
-        
-        return uri;
-    }
-
-    private async deleteTempFile(uri: vscode.Uri): Promise<void> {
-        try {
-            await vscode.workspace.fs.delete(uri);
-        } catch (error) {
-            console.error(`Failed to delete temporary file ${uri.fsPath}:`, error);
-        }
-    }
-
-    public async showDiffAndGetApproval(filepath: string, originalContent: string, proposedContent: string): Promise<boolean> {
-        console.log(`Showing diff for ${filepath}`);
-        console.log(`Original content:\n${originalContent}`);
-        console.log(`Proposed content:\n${proposedContent}`);
-
-        const originalUri = await this.createTempFile(originalContent);
-        const modifiedUri = await this.createTempFile(proposedContent);
-
-        try {
-            const title = `Proposed Edit`;
-            const diffOptions: vscode.TextDocumentShowOptions = {
-                viewColumn: vscode.ViewColumn.Active,
-                preview: false
-            };
-
-            await vscode.commands.executeCommand('vscode.diff', originalUri, modifiedUri, title, diffOptions);
-
-            // Create a status bar item for user actions
-            const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-            statusBarItem.text = "$(diff-added) Review Changes";
-            statusBarItem.tooltip = "Click to accept or reject changes";
-            statusBarItem.command = 'extension.reviewChanges';
-            statusBarItem.show();
-
-            return new Promise<boolean>((resolve) => {
-                if (!this.reviewChangesCommand) {
-                    this.reviewChangesCommand = vscode.commands.registerCommand('extension.reviewChanges', async () => {
-                        const result = await vscode.window.showQuickPick(['Accept Changes', 'Reject Changes'], {
-                            placeHolder: 'Do you want to apply these changes?'
-                        });
-
-                        statusBarItem.dispose();
-
-                        // Close the diff view
-                        await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
-
-                        resolve(result === 'Accept Changes');
-                    });
-                }
-            });
-        } finally {
-            // Ensure temp files are deleted even if an error occurs
-            await this.deleteTempFile(originalUri);
-            await this.deleteTempFile(modifiedUri);
-        }
-    }
-
-    public async applyChangesToFile(filepath: string, newContent: string): Promise<void> {
-        console.log(`Applying changes to file: ${filepath}`);
-        const uri = vscode.Uri.file(filepath);
-        const encoder = new TextEncoder();
-        try {
-            await vscode.workspace.fs.writeFile(uri, encoder.encode(newContent));
-            console.log(`Changes applied successfully to ${filepath}`);
-            
-            // Force a refresh of the file in the editor
-            const document = await vscode.workspace.openTextDocument(uri);
-            await vscode.window.showTextDocument(document, { preview: false });
-            
-            // Verify the file content after writing
-            const updatedContent = await vscode.workspace.fs.readFile(uri);
-            const updatedContentString = new TextDecoder().decode(updatedContent);
-            console.log(`Updated file content:\n${updatedContentString}`);
-            
-            if (updatedContentString !== newContent) {
-                console.error('File content does not match the expected content after writing');
-            }
-        } catch (error) {
-            console.error(`Error applying changes to ${filepath}:`, error);
-            throw error;
-        }
-    }
-}
-
-
 class AnthropicChat {
     private client: Anthropic | undefined;
     private webview: vscode.Webview | undefined;
@@ -373,7 +245,7 @@ class AnthropicChat {
 
         const editorContentsXml = await this.editorContentProvider.getAllEditorsContentAsXml();
         const contextMessage = `Current open files:\n${editorContentsXml}`;
-        const systemPrompt = contextMessage + '\nYou are a AI assistant with access to the following tools: ' + JSON.stringify(toolSchemas, null, 2) + '. Always include the new file content when editing files. You can also view the current open files as well as the active editor. Always think step by step in a <thinking>...</thinking> block before doing anything.';
+        const systemPrompt = contextMessage + '\nYou are a AI assistant with access to the following tools: ' + JSON.stringify(toolSchemas, null, 2) + '. You can also view the current open files as well as the active editor. To edit or create a file first open the file then use `cat` to write the new content. Always think step by step in a <thinking>...</thinking> block before doing anything.';
 
         const stream = await this.client.messages.stream({
             messages: this.messages,
@@ -409,8 +281,6 @@ class AnthropicChat {
                 let result: string;
                 if (toolUse.name === 'execute_command') {
                     result = await this.executeCommandInTerminal(toolUse);
-                } else if (toolUse.name === 'edit_file') {
-                    result = await this.handleEditFileTool(toolUse);
                 } else if (toolUse.name === 'open_file') {
                     result = await this.handleOpenFileTool(toolUse);
                 } else {
@@ -502,66 +372,27 @@ class AnthropicChat {
 
         try {
             const uri = vscode.Uri.file(filePath);
-            const document = await vscode.workspace.openTextDocument(uri);
+            let document: vscode.TextDocument;
+
+            try {
+                // Try to open the existing document
+                document = await vscode.workspace.openTextDocument(uri);
+            } catch (error) {
+                // If the file doesn't exist, create it
+                const fileContent = '';
+                const writeData = new Uint8Array(Buffer.from(fileContent));
+                await vscode.workspace.fs.writeFile(uri, writeData);
+                document = await vscode.workspace.openTextDocument(uri);
+            }
+
             await vscode.window.showTextDocument(document);
             return `File ${filePath} opened successfully.`;
         } catch (error) {
-            console.error('Error opening file:', error);
+            console.error('Error opening or creating file:', error);
             if (error instanceof Error) {
-                return `Error opening file: ${error.message}`;
+                return `Error opening or creating file: ${error.message}`;
             } else {
-                return `An unexpected error occurred while opening the file: ${String(error)}`;
-            }
-        }
-    }
-
-    private async handleEditFileTool(toolUse: ToolUseBlock): Promise<string> {
-        console.log('==== STARTING EDIT FILE TOOL HANDLING ====');
-        console.log('Received tool use:', JSON.stringify(toolUse, null, 2));
-
-        const input = toolUse.input as { filepath: string; purpose: string; file_content: string };
-        console.log('Edit file tool input:', JSON.stringify(input, null, 2));
-
-        const filePath = input.filepath;
-        const purpose = input.purpose;
-        const proposedContent = input.file_content;
-
-        console.log(`File path: ${filePath}`);
-        console.log(`Purpose: ${purpose}`);
-        console.log(`Proposed content: ${proposedContent}`);
-
-        if (!proposedContent) {
-            console.error('Proposed content is undefined or empty');
-            return 'Error: Proposed content is missing';
-        }
-
-        try {
-            const uri = vscode.Uri.file(filePath);
-            const originalContentBuffer = await vscode.workspace.fs.readFile(uri);
-            const originalContent = new TextDecoder().decode(originalContentBuffer);
-
-            console.log(`Original content:\n${originalContent}`);
-
-            const diffHandler = FileDiffHandler.getInstance();
-            const approved = await diffHandler.showDiffAndGetApproval(filePath, originalContent, proposedContent);
-
-            if (approved) {
-                console.log('Changes approved, applying to file...');
-                await diffHandler.applyChangesToFile(filePath, proposedContent);
-                console.log('Changes applied successfully.');
-                return 'Changes applied successfully.';
-            } else {
-                console.log('Changes were not approved.');
-                return 'Changes were not applied.';
-            }
-        } catch (error: unknown) {
-            console.error('Error handling edit_file tool:', error);
-            if (error instanceof vscode.FileSystemError) {
-                return `File system error: ${error.message}`;
-            } else if (error instanceof Error) {
-                return `Error: ${error.message}`;
-            } else {
-                return `An unexpected error occurred: ${String(error)}`;
+                return `An unexpected error occurred while opening or creating the file: ${String(error)}`;
             }
         }
     }

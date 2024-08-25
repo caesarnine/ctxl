@@ -78,7 +78,7 @@ const toolSchemas: Tool[] = [
     },
     {
         name: 'open_file',
-        description: 'Open a file in the VS Code editor',
+        description: 'Open a file in the VS Code editor. If the file does not exist, it will be created.',
         input_schema: {
             type: 'object',
             properties: {
@@ -297,7 +297,7 @@ class AnthropicChat {
 
         const editorContentsXml = await this.editorContentProvider.getAllEditorsContentAsXml();
         const contextMessage = `Current open files:\n${editorContentsXml}`;
-        const systemPrompt = contextMessage + '\nYou are an AI assistant with access to the following tools: ' + JSON.stringify(toolSchemas, null, 2) + '. You can also view the current open files as well as the active editor. To edit or create a file first open the file using `open_file` then use `cat` to write the new content. Always think step by step in a <thinking>...</thinking> block before doing anything.';
+        const systemPrompt = contextMessage + '\nYou are an AI assistant with access to the following tools: ' + JSON.stringify(toolSchemas, null, 2) + '. You can also view the current open files as well as the active editor. Always use `open_file` to open a file before writing or editing it. Always think step by step in a <thinking>...</thinking> block before doing anything.';
 
         const stream = await this.client.streamResponse(this.messages, systemPrompt, toolSchemas);
 

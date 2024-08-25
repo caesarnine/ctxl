@@ -10,6 +10,53 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import ignore from 'ignore';
 
+// Define an interface for the chat client
+interface ChatClient {
+    streamResponse(messages: MessageParam[], systemPrompt: string, tools: Tool[]): Promise<AsyncIterable<any>>;
+}
+
+// Implement the interface for direct Anthropic API
+class AnthropicDirectClient implements ChatClient {
+    private client: Anthropic;
+
+    constructor(apiKey: string) {
+        this.client = new Anthropic({ apiKey });
+    }
+
+    async streamResponse(messages: MessageParam[], systemPrompt: string, tools: Tool[]): Promise<AsyncIterable<any>> {
+        return this.client.messages.stream({
+            messages,
+            model: 'claude-3-5-sonnet-20240620',
+            max_tokens: 8096,
+            system: systemPrompt,
+            tools,
+        });
+    }
+}
+
+class AnthropicBedrockWrapper implements ChatClient {
+    private client: any;
+
+    async initialize() {
+        const { AnthropicBedrock } = await import('@anthropic-ai/bedrock-sdk');
+        this.client = new AnthropicBedrock();
+    }
+
+    async streamResponse(messages: MessageParam[], systemPrompt: string, tools: Tool[]): Promise<AsyncIterable<any>> {
+        if (!this.client) {
+            await this.initialize();
+        }
+        return this.client.messages.create({
+            model: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
+            messages,
+            max_tokens: 8096,
+            system: systemPrompt,
+            tools,
+            stream: true,
+        });
+    }
+}
+
 const toolSchemas: Tool[] = [
     {
         name: 'execute_command',
@@ -194,7 +241,7 @@ class EditorContentProvider {
 }
 
 class AnthropicChat {
-    private client: Anthropic | undefined;
+    private client: ChatClient | undefined;
     private webview: vscode.Webview | undefined;
     private messages: MessageParam[] = [];
     private terminal: vscode.Terminal | undefined;
@@ -208,9 +255,14 @@ class AnthropicChat {
     }
 
     async initializeClient() {
-        const apiKey = await this.context.secrets.get('anthropic-api-key');
-        if (apiKey) {
-            this.client = new Anthropic({ apiKey });
+        const clientType = await vscode.workspace.getConfiguration('contextualChat').get('clientType', 'direct');
+        if (clientType === 'direct') {
+            const apiKey = await this.context.secrets.get('anthropic-api-key');
+            if (apiKey) {
+                this.client = new AnthropicDirectClient(apiKey);
+            }
+        } else if (clientType === 'bedrock') {
+            this.client = new AnthropicBedrockWrapper();
         }
     }
 
@@ -245,25 +297,41 @@ class AnthropicChat {
 
         const editorContentsXml = await this.editorContentProvider.getAllEditorsContentAsXml();
         const contextMessage = `Current open files:\n${editorContentsXml}`;
-        const systemPrompt = contextMessage + '\nYou are a AI assistant with access to the following tools: ' + JSON.stringify(toolSchemas, null, 2) + '. You can also view the current open files as well as the active editor. To edit or create a file first open the file then use `cat` to write the new content. Always think step by step in a <thinking>...</thinking> block before doing anything.';
+        const systemPrompt = contextMessage + '\nYou are an AI assistant with access to the following tools: ' + JSON.stringify(toolSchemas, null, 2) + '. You can also view the current open files as well as the active editor. To edit or create a file first open the file using `open_file` then use `cat` to write the new content. Always think step by step in a <thinking>...</thinking> block before doing anything.';
 
-        const stream = await this.client.messages.stream({
-            messages: this.messages,
-            model: 'claude-3-5-sonnet-20240620',
-            max_tokens: 1024,
-            system: systemPrompt,
-            tools: toolSchemas,
-        });
+        const stream = await this.client.streamResponse(this.messages, systemPrompt, toolSchemas);
 
         let assistantMessage = '';
+        let currentToolUse: Partial<ToolUseBlock> | null = null;
+        let currentInputJson = '';
         let toolUses: ToolUseBlock[] = [];
 
         for await (const event of stream) {
+            console.log('Stream event:', JSON.stringify(event, null, 2));
+
             if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
                 assistantMessage += event.delta.text;
                 this.webview.postMessage({ type: 'assistantDelta', content: event.delta.text });
             } else if (event.type === 'content_block_start' && event.content_block.type === 'tool_use') {
-                toolUses.push(event.content_block);
+                currentToolUse = {
+                    type: 'tool_use',
+                    id: event.content_block.id,
+                    name: event.content_block.name,
+                    input: {}
+                };
+                currentInputJson = '';
+            } else if (event.type === 'content_block_delta' && event.delta.type === 'input_json_delta') {
+                currentInputJson += event.delta.partial_json;
+            } else if (event.type === 'content_block_stop' && currentToolUse) {
+                try {
+                    currentToolUse.input = JSON.parse(currentInputJson);
+                    console.log('Complete Tool Use:', JSON.stringify(currentToolUse, null, 2));
+                    toolUses.push(currentToolUse as ToolUseBlock);
+                } catch (error) {
+                    console.error('Error parsing tool input JSON:', error);
+                }
+                currentToolUse = null;
+                currentInputJson = '';
             }
         }
 
@@ -278,14 +346,7 @@ class AnthropicChat {
                 console.log('\nTool Use:', JSON.stringify(toolUse, null, 2));
                 assistantContent.push(toolUse);
 
-                let result: string;
-                if (toolUse.name === 'execute_command') {
-                    result = await this.executeCommandInTerminal(toolUse);
-                } else if (toolUse.name === 'open_file') {
-                    result = await this.handleOpenFileTool(toolUse);
-                } else {
-                    result = 'Unknown tool';
-                }
+                let result: string = await this.handleToolUse(toolUse);
 
                 console.log(`\nTool Result:\n${result}`);
             
@@ -316,6 +377,21 @@ class AnthropicChat {
         } else {
             this.messages.push({ role: 'assistant', content: assistantMessage });
         }
+    }
+
+    private async handleToolUse(toolUse: ToolUseBlock): Promise<string> {
+        console.log('Handling tool use:', JSON.stringify(toolUse, null, 2));
+        let result: string;
+        if (toolUse.name === 'execute_command') {
+            result = await this.executeCommandInTerminal(toolUse);
+        } else if (toolUse.name === 'open_file') {
+            result = await this.handleOpenFileTool(toolUse);
+        } else {
+            result = 'Unknown tool';
+        }
+
+        console.log(`Tool Result:\n${result}`);
+        return result;
     }
 
     private async waitForShellIntegration(terminal: vscode.Terminal, timeout: number = 5000): Promise<boolean> {
@@ -807,6 +883,19 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }
     });
+
+    const setClientTypeCommand = vscode.commands.registerCommand('vscode-ctxl.setClientType', async () => {
+        const clientType = await vscode.window.showQuickPick(['direct', 'bedrock'], {
+            placeHolder: 'Select Anthropic client type',
+        });
+
+        if (clientType) {
+            await vscode.workspace.getConfiguration('contextualChat').update('clientType', clientType, true);
+            await anthropicChat.initializeClient();
+            vscode.window.showInformationMessage(`Anthropic client type set to ${clientType}`);
+        }
+    });
+    context.subscriptions.push(setClientTypeCommand);
     context.subscriptions.push(setApiKeyCommand);
 
     console.log('Contextual Chat extension activated successfully');

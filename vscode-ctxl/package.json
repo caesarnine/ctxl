@@ -19,6 +19,10 @@
       {
         "command": "vscode-ctxl.setAnthropicApiKey",
         "title": "Set Anthropic API Key"
+      },
+      {
+        "command": "vscode-ctxl.setClientType",
+        "title": "Set Anthropic Client Type"
       }
     ],
     "viewsContainers": {
@@ -46,6 +50,12 @@
           "type": "string",
           "default": "",
           "description": "API key for Anthropic Claude"
+        },
+        "contextualChat.clientType": {
+          "type": "string",
+          "enum": ["direct", "bedrock"],
+          "default": "direct",
+          "description": "Specifies the Anthropic client type to use (direct API or AWS Bedrock)."
         }
       }
     }

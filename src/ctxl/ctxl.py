@@ -2,7 +2,9 @@ import logging
 import os
 import xml.etree.ElementTree as ET
 from typing import Dict, List, Set
+
 import pathspec
+
 from .preset_manager import (
     get_presets,
 )
@@ -107,6 +109,46 @@ def create_file_element(file_path, file_content):
     return file_element
 
 
+def generate_tree(
+    folder_path: str,
+    include_patterns: List[str],
+    exclude_patterns: List[str],
+    gitignore_path: str,
+    include_dotfiles: bool,
+) -> str:
+    gitignore_patterns = read_gitignore(gitignore_path)
+
+    # Create separate PathSpec objects for include and exclude patterns
+    include_spec = pathspec.PathSpec.from_lines("gitwildmatch", include_patterns)
+    exclude_spec = pathspec.PathSpec.from_lines(
+        "gitwildmatch", exclude_patterns + gitignore_patterns
+    )
+
+    def build_tree(root_path, prefix=""):
+        tree_str = ""
+        items = sorted(os.listdir(root_path))
+        if not include_dotfiles:
+            items = [item for item in items if not item.startswith(".")]
+
+        for index, item in enumerate(items):
+            item_path = os.path.join(root_path, item)
+            rel_item_path = os.path.relpath(item_path, folder_path)
+
+            if exclude_spec.match_file(rel_item_path):
+                continue
+
+            connector = "└── " if index == len(items) - 1 else "├── "
+            tree_str += f"{prefix}{connector}{item}\n"
+
+            if os.path.isdir(item_path):
+                extension = "    " if index == len(items) - 1 else "│   "
+                tree_str += build_tree(item_path, prefix + extension)
+
+        return tree_str
+
+    return build_tree(folder_path)
+
+
 def generate_xml(
     folder_path: str,
     include_patterns: List[str],
@@ -151,25 +193,10 @@ def generate_xml(
 
     logger.info(f"Processed {file_count} files with {error_count} errors")
 
-    # Generate complete directory structure
+    # Generate complete directory structure in tree format
+    tree_output = generate_tree(folder_path, include_patterns, exclude_patterns, gitignore_path, include_dotfiles)
     dir_structure_element = ET.SubElement(project_context, "directory_structure")
-    for root, dirs, files in os.walk(folder_path):
-        # Skip dotfiles and directories unless include_dotfiles is True
-        if not include_dotfiles:
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
-            files = [f for f in files if not f.startswith(".")]
-
-        rel_root = os.path.relpath(root, folder_path)
-        if rel_root == ".":
-            dir_element = dir_structure_element
-        else:
-            dir_element = ET.SubElement(
-                dir_structure_element, "directory", path=rel_root
-            )
-
-        for file in files:
-            rel_file_path = os.path.join(rel_root, file)
-            ET.SubElement(dir_element, "file", path=rel_file_path)
+    dir_structure_element.text = tree_output
 
     task_element = ET.SubElement(root_element, "task")
     task_element.text = task
